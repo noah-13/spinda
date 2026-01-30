@@ -1,0 +1,21 @@
+# data
+chaosNLI/
+
+# Virtual environments
+.venv/
+
+# Python caches/build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Testing & tooling
+.pytest_cache/
+uv.lock
+
+# Build metadata
+*.egg-info/
+
+# Experiment outputs
+outputs/
+wandb/
