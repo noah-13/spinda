@@ -11,8 +11,9 @@ Example usage:
 
 import argparse
 import json
+import re
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 
@@ -21,29 +22,119 @@ from nli_toolkits.data import (
     NLIDistributionSample,
     NLISample,
     SNLIReader,
+    PredictionRecord,
+    NLI_NUM_LABELS
 )
-from nli_toolkits.data.schemas import PredictionRecord
-from nli_toolkits.data.schemas import NLI_NUM_LABELS
-from nli_toolkits.eval import Evaluator
-from nli_toolkits.eval.metrics import compute_distce
+from nli_toolkits.eval import Evaluator, compute_distce
 
 
-def load_predictions(file_path: Path) -> List[PredictionRecord]:
-    """Load predictions from JSONL file."""
+def _parse_chaosnli_preds_line(
+    line: str,
+    line_num: int,
+    source: str,
+) -> Optional[PredictionRecord]:
+    parts = line.rstrip("\n").split("\t")
+    if not parts:
+        return None
+
+    prob_cell = parts[0].strip()
+    if "=" not in prob_cell:
+        return None
+
+    probs_map = {}
+    for chunk in prob_cell.split("|"):
+        if "=" not in chunk:
+            continue
+        key, value = chunk.split("=", 1)
+        key = key.strip().lower()
+        try:
+            prob = float(value)
+        except ValueError:
+            continue
+        if key in ("entailment", "e"):
+            probs_map["entailment"] = prob
+        elif key in ("neutral", "n"):
+            probs_map["neutral"] = prob
+        elif key in ("contradiction", "c"):
+            probs_map["contradiction"] = prob
+
+    if not probs_map:
+        return None
+
+    probs = [
+        probs_map.get("entailment", 0.0),
+        probs_map.get("neutral", 0.0),
+        probs_map.get("contradiction", 0.0),
+    ]
+    pred = int(max(range(len(probs)), key=lambda i: probs[i]))
+
+    pred_id = None
+    if len(parts) > 8 and parts[8] != "_":
+        pred_id = parts[8]
+    if pred_id is None:
+        for cell in parts:
+            if not cell or cell == "_":
+                continue
+            if ".jpg#" in cell or ".png#" in cell or re.search(r"#\\d", cell):
+                pred_id = cell
+                break
+    if pred_id is None:
+        pred_id = f"chaosnli_pred_{line_num}"
+
+    return PredictionRecord(
+        id=str(pred_id),
+        task="nli",
+        split="unknown",
+        source=source,
+        outputs={
+            "probs": probs,
+            "pred": pred,
+        },
+    )
+
+
+def load_predictions(
+    file_path: Path,
+    predictions_format: str = "jsonl",
+) -> List[PredictionRecord]:
+    """Load predictions from JSONL file or ChaosNLI preds TSV-like format."""
     predictions = []
     with open(file_path, "r", encoding="utf-8") as f:
-        for line in f:
+        for line_num, line in enumerate(f, 1):
             if not line.strip():
                 continue
-            data = json.loads(line)
-            pred = PredictionRecord(
-                id=data["id"],
-                task=data.get("task", "nli"),
-                split=data.get("split", "unknown"),
-                source=data.get("source"),
-                outputs=data["outputs"],
+            if predictions_format == "jsonl":
+                try:
+                    data = json.loads(line)
+                    pred = PredictionRecord(
+                        id=data["id"],
+                        task=data.get("task", "nli"),
+                        split=data.get("split", "unknown"),
+                        source=data.get("source"),
+                        outputs=data["outputs"],
+                    )
+                    predictions.append(pred)
+                    continue
+                except json.JSONDecodeError:
+                    raise ValueError(
+                        f"Invalid JSONL on line {line_num} "
+                        f"while predictions_format=jsonl"
+                    )
+
+            if predictions_format == "machamp":
+                pred = _parse_chaosnli_preds_line(
+                    line,
+                    line_num,
+                    source="machamp",
+                )
+                if pred is not None:
+                    predictions.append(pred)
+                    continue
+
+            raise ValueError(
+                f"Could not parse line {line_num} with "
+                f"predictions_format={predictions_format}"
             )
-            predictions.append(pred)
     return predictions
 
 
@@ -135,6 +226,14 @@ def main() -> None:
         required=True,
         help="Path to predictions JSONL file",
     )
+
+    parser.add_argument(
+        "--predictions_format",
+        type=str,
+        default="jsonl",
+        choices=["jsonl", "machamp"],
+        help="Predictions file format (default: jsonl)",
+    )
     
     parser.add_argument(
         "--ground_truth_source",
@@ -191,7 +290,10 @@ def main() -> None:
     
     # Load predictions
     print(f"Loading predictions from {args.predictions}...")
-    predictions = load_predictions(Path(args.predictions))
+    predictions = load_predictions(
+        Path(args.predictions),
+        predictions_format=args.predictions_format,
+    )
     print(f"Loaded {len(predictions)} predictions")
     
     # Load ground truth

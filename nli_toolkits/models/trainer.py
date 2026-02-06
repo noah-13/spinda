@@ -148,7 +148,7 @@ class NLITrainer:
                 examples["premise"],
                 examples["hypothesis"],
                 truncation=True,
-                padding="max_length",
+                padding="longest",
                 max_length=self.config.max_length,
             )
 

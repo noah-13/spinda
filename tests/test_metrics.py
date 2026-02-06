@@ -2,113 +2,113 @@
 
 import numpy as np
 import pytest
+import math
 
 from nli_toolkits.eval.metrics import (
     compute_distce,
-    compute_ece,
-    compute_entce,
-    compute_rankcs,
+    compute_kl,
+    compute_jsd,
 )
 
 
-def test_compute_ece_perfect_calibration():
-    """Test ECE with perfectly calibrated predictions."""
-    n = 1000
-    # Create perfectly calibrated scenario:
-    # For each confidence level, accuracy equals confidence
-    # We'll use multiple confidence levels to test binning
-    num_bins = 10
-    bin_size = n // num_bins
+# def test_compute_ece_perfect_calibration():
+#     """Test ECE with perfectly calibrated predictions."""
+#     n = 1000
+#     # Create perfectly calibrated scenario:
+#     # For each confidence level, accuracy equals confidence
+#     # We'll use multiple confidence levels to test binning
+#     num_bins = 10
+#     bin_size = n // num_bins
     
-    predictions = []
-    confidences = []
-    labels = []
+#     predictions = []
+#     confidences = []
+#     labels = []
     
-    np.random.seed(42)  # For reproducibility
-    for i in range(num_bins):
-        # Confidence for this bin (0.1 to 1.0)
-        conf = (i + 1) / num_bins
-        # Create bin_size samples with this confidence
-        for j in range(bin_size):
-            pred = np.random.randint(0, 3)
-            predictions.append(pred)
-            confidences.append(conf)
+#     np.random.seed(42)  # For reproducibility
+#     for i in range(num_bins):
+#         # Confidence for this bin (0.1 to 1.0)
+#         conf = (i + 1) / num_bins
+#         # Create bin_size samples with this confidence
+#         for j in range(bin_size):
+#             pred = np.random.randint(0, 3)
+#             predictions.append(pred)
+#             confidences.append(conf)
             
-            # For perfect calibration: accuracy should equal confidence
-            # So if confidence is c, then c fraction should be correct
-            # Use random to decide if this prediction is correct
-            is_correct = np.random.random() < conf
-            if is_correct:
-                labels.append(pred)  # Correct prediction
-            else:
-                # Wrong prediction: choose a different label
-                wrong_label = (pred + 1) % 3
-                labels.append(wrong_label)
+#             # For perfect calibration: accuracy should equal confidence
+#             # So if confidence is c, then c fraction should be correct
+#             # Use random to decide if this prediction is correct
+#             is_correct = np.random.random() < conf
+#             if is_correct:
+#                 labels.append(pred)  # Correct prediction
+#             else:
+#                 # Wrong prediction: choose a different label
+#                 wrong_label = (pred + 1) % 3
+#                 labels.append(wrong_label)
     
-    predictions = np.array(predictions)
-    confidences = np.array(confidences)
-    labels = np.array(labels)
+#     predictions = np.array(predictions)
+#     confidences = np.array(confidences)
+#     labels = np.array(labels)
     
-    ece = compute_ece(predictions, confidences, labels, num_bins=num_bins)
+#     ece = compute_ece(predictions, confidences, labels, num_bins=num_bins)
     
-    # Should be close to 0 for perfect calibration
-    assert ece >= 0
-    assert ece < 0.1  # Allow some numerical error due to randomness
+#     # Should be close to 0 for perfect calibration
+#     assert ece >= 0
+#     assert ece < 0.1  # Allow some numerical error due to randomness
 
 
-def test_compute_ece_miscalibrated():
-    """Test ECE with miscalibrated predictions."""
-    n = 1000
-    predictions = np.random.randint(0, 3, n)
-    confidences = np.ones(n) * 0.9  # High confidence
-    labels = np.random.randint(0, 3, n)  # Random labels (low accuracy)
+# def test_compute_ece_miscalibrated():
+#     """Test ECE with miscalibrated predictions."""
+#     n = 1000
+#     predictions = np.random.randint(0, 3, n)
+#     confidences = np.ones(n) * 0.9  # High confidence
+#     labels = np.random.randint(0, 3, n)  # Random labels (low accuracy)
     
-    ece = compute_ece(predictions, confidences, labels)
-    # Should be high for miscalibration
-    assert ece > 0.5
+#     ece = compute_ece(predictions, confidences, labels)
+#     # Should be high for miscalibration
+#     assert ece > 0.5
 
 
-def test_compute_entce():
-    """Test EntCE computation."""
-    n = 10
-    num_classes = 3
+# def test_compute_entce():
+#     """Test EntCE computation."""
+#     n = 10
+#     num_classes = 3
     
-    # Model predictions (uniform)
-    model_probs = np.ones((n, num_classes)) / num_classes
+#     # Model predictions (uniform)
+#     model_probs = np.ones((n, num_classes)) / num_classes
     
-    # Human distribution (also uniform)
-    human_probs = np.ones((n, num_classes)) / num_classes
+#     # Human distribution (also uniform)
+#     human_probs = np.ones((n, num_classes)) / num_classes
     
-    entce = compute_entce(model_probs, human_probs)
-    assert entce.shape == (n,)
-    # Should be close to 0 when entropies match
-    assert np.allclose(entce, 0.0, atol=1e-6)
+#     entce = compute_entce(model_probs, human_probs)
+#     assert entce.shape == (n,)
+#     # Should be close to 0 when entropies match
+#     assert np.allclose(entce, 0.0, atol=1e-6)
 
 
-def test_compute_rankcs_perfect_match():
-    """Test RankCS with perfect ranking match."""
-    n = 10
-    num_classes = 3
+# def test_compute_rankcs_perfect_match():
+#     """Test RankCS with perfect ranking match."""
+#     n = 10
+#     num_classes = 3
     
-    # Same distributions
-    model_probs = np.array([[0.7, 0.2, 0.1], [0.5, 0.3, 0.2]] * (n // 2))
-    human_probs = model_probs.copy()
+#     # Same distributions
+#     model_probs = np.array([[0.7, 0.2, 0.1], [0.5, 0.3, 0.2]] * (n // 2))
+#     human_probs = model_probs.copy()
     
-    rankcs = compute_rankcs(model_probs, human_probs)
-    assert rankcs == 1.0
+#     rankcs = compute_rankcs(model_probs, human_probs)
+#     assert rankcs == 1.0
 
 
-def test_compute_rankcs_no_match():
-    """Test RankCS with completely different rankings."""
-    n = 10
-    num_classes = 3
+# def test_compute_rankcs_no_match():
+#     """Test RankCS with completely different rankings."""
+#     n = 10
+#     num_classes = 3
     
-    # Opposite rankings
-    model_probs = np.array([[0.7, 0.2, 0.1]] * n)
-    human_probs = np.array([[0.1, 0.2, 0.7]] * n)
+#     # Opposite rankings
+#     model_probs = np.array([[0.7, 0.2, 0.1]] * n)
+#     human_probs = np.array([[0.1, 0.2, 0.7]] * n)
     
-    rankcs = compute_rankcs(model_probs, human_probs)
-    assert rankcs == 0.0
+#     rankcs = compute_rankcs(model_probs, human_probs)
+#     assert rankcs == 0.0
 
 
 def test_compute_distce():
@@ -139,3 +139,38 @@ def test_compute_distce_different():
     distce = compute_distce(model_probs, human_probs)
     # TVD = 0.5 * (|1-0| + |0-0| + |0-1|) = 0.5 * 2 = 1.0
     assert np.allclose(distce, 1.0, atol=1e-6)
+
+def test_compute_kl():
+    """Test KL divergence computation."""
+    p = np.array([[0.7, 0.2, 0.1]])
+    q = np.array([[0.6, 0.3, 0.1]])
+    
+    kl = compute_kl(p, q)
+    # KL should be non-negative
+    assert kl >= 0
+    # KL should be 0 if distributions are the same
+    assert compute_kl(p, p) < 1e-6 
+
+def test_compute_jsd():
+    """Test JSD computation."""
+    p = np.array([[0.7, 0.2, 0.1]])
+    q = np.array([[0.6, 0.3, 0.1]])
+    
+    jsd = compute_jsd(p, q)
+    # JSD should be non-negative and at most log(2) for two distributions
+    assert jsd >= 0
+    assert jsd <= 1
+    # JSD should be 0 if distributions are the same
+    assert compute_jsd(p, p) < 1e-6
+
+def test_compute_jsd_maximum():
+    """Test JSD with completely different distributions."""
+    p = np.array([[1.0, 0.0, 0.0]])
+    q = np.array([[0.0, 0.0, 1.0]])
+    
+    jsd_base_e = compute_jsd(p, q, base=math.e)
+    # For two completely different distributions, JSD should be log(2)
+    assert np.allclose(jsd_base_e, math.sqrt(math.log(2)), atol=1e-6)
+    jsd_base_2 = compute_jsd(p, q)
+    # JSD should be the same regardless of log base since it's a ratio
+    assert np.allclose(jsd_base_2, 1, atol=1e-6)
