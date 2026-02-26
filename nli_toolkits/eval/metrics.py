@@ -1,272 +1,327 @@
 """
 Evaluation metrics for NLI calibration.
 
-Implements metrics from:
-"Stop Measuring Calibration When Humans Disagree" (Baan et al., EMNLP 2022)
-TVD-based DistCE
 """
 
 import numpy as np
 from typing import Optional
 from scipy.special import rel_entr
 import math
-
-# def compute_ece(
-#     predictions: np.ndarray,
-#     confidences: np.ndarray,
-#     labels: np.ndarray,
-#     num_bins: int = 15,
-# ) -> float:
-#     """
-#     Compute Expected Calibration Error (ECE).
-    
-#     Formula from Guo et al. (2017), adapted for multi-class:
-#     ECE = Σ_m |B_m|/N * |acc(B_m) - conf(B_m)|
-    
-#     Args:
-#         predictions: Predicted class labels (shape: [N])
-#         confidences: Maximum predicted probabilities (shape: [N])
-#         labels: Ground truth labels (shape: [N])
-#         num_bins: Number of bins for discretization (default: 15)
-        
-#     Returns:
-#         ECE score (lower is better)
-#     """
-#     n = len(predictions)
-#     if n == 0:
-#         return 0.0
-    
-#     # Create bins
-#     bin_boundaries = np.linspace(0, 1, num_bins + 1)
-#     bin_lowers = bin_boundaries[:-1]
-#     bin_uppers = bin_boundaries[1:]
-    
-#     ece = 0.0
-#     for bin_lower, bin_upper in zip(bin_lowers, bin_uppers):
-#         # Find predictions in this bin
-#         in_bin = (confidences > bin_lower) & (confidences <= bin_upper)
-#         if bin_lower == 0.0:
-#             # Include the lower boundary
-#             in_bin = (confidences >= bin_lower) & (confidences <= bin_upper)
-        
-#         prop_in_bin = in_bin.mean()
-#         if prop_in_bin > 0:
-#             # Accuracy in this bin
-#             accuracy_in_bin = (predictions[in_bin] == labels[in_bin]).mean()
-#             # Average confidence in this bin
-#             avg_confidence_in_bin = confidences[in_bin].mean()
-#             ece += np.abs(avg_confidence_in_bin - accuracy_in_bin) * prop_in_bin
-    
-#     return float(ece)
+import dcor
 
 
-# def compute_entce(
-#     model_probs: np.ndarray,
-#     human_probs: np.ndarray,
-# ) -> np.ndarray:
-#     """
-#     Compute Human Entropy Calibration Error (EntCE) per instance.
-    
-#     Formula: EntCE(x) = H(f(x)) - H(π̄(x))
-#     where H(p) = -Σ p_i * log(p_i) is the entropy.
-    
-#     Args:
-#         model_probs: Model predicted probabilities (shape: [N, num_classes])
-#         human_probs: Human annotation distribution (shape: [N, num_classes])
-        
-#     Returns:
-#         Array of EntCE values per instance (shape: [N])
-#     """
-#     # Add small epsilon to avoid log(0)
-#     eps = 1e-10
-    
-#     # Compute entropy for model predictions
-#     model_entropy = -np.sum(model_probs * np.log(model_probs + eps), axis=1)
-    
-#     # Compute entropy for human distributions
-#     human_entropy = -np.sum(human_probs * np.log(human_probs + eps), axis=1)
-    
-#     # EntCE = model_entropy - human_entropy
-#     entce = model_entropy - human_entropy
-    
-#     return entce
+import numpy as np
 
+def validate_and_fix_probs(
+    probs: np.ndarray,
+    *,
+    name: str = "probs",
+    axis: int = 1,
+    atol: float = 1e-6,
+) -> np.ndarray:
+    """
+    Validate probability matrix and fix small floating-point deviations.
 
-# def compute_rankcs(
-#     model_probs: np.ndarray,
-#     human_probs: np.ndarray,
-# ) -> float:
-#     """
-#     Compute Human Ranking Calibration Score (RankCS).
-    
-#     Formula: RankCS = 1/N * Σ_n [argsort(f(x_n)) == argsort(π̄(x_n))]
-    
-#     Measures whether the model's class ranking matches human ranking.
-    
-#     Args:
-#         model_probs: Model predicted probabilities (shape: [N, num_classes])
-#         human_probs: Human annotation distribution (shape: [N, num_classes])
-        
-#     Returns:
-#         RankCS score (higher is better, range: [0, 1])
-#     """
-#     n = model_probs.shape[0]
-#     if n == 0:
-#         return 0.0
-    
-#     matches = 0
-#     for i in range(n):
-#         model_ranking = np.argsort(model_probs[i])[::-1]  # Descending order
-#         human_ranking = np.argsort(human_probs[i])[::-1]  # Descending order
-        
-#         if np.array_equal(model_ranking, human_ranking):
-#             matches += 1
-    
-#     return matches / n
+    - Requires 2D array [N, num_classes]
+    - Non-negative
+    - Finite
+    - Row sums close to 1 (within atol)
+    - Automatically renormalizes small deviations
+    """
+    probs = np.asarray(probs, dtype=np.float64)
 
+    if probs.ndim != 2:
+        raise ValueError(f"{name} must be 2D array [N, num_classes]")
 
-def compute_distce(
+    if not np.isfinite(probs).all():
+        raise ValueError(f"{name} contains NaN or inf")
+
+    if np.any(probs < 0):
+        raise ValueError(f"{name} contains negative values")
+
+    row_sums = probs.sum(axis=axis, keepdims=True)
+
+    if not np.allclose(row_sums, 1.0, atol=atol):
+        raise ValueError(
+            f"Each row of {name} must sum to 1 within tolerance {atol}"
+        )
+
+    # Fix tiny floating point drift
+    probs = probs / row_sums
+
+    return probs
+
+"""
+Implements metrics from:
+"Stop Measuring Calibration When Humans Disagree" (Baan et al., EMNLP 2022)
+- DistCE (Distribution Calibration Error) = TVD(model_probs, human_probs)
+"""
+
+def compute_tvd(
     model_probs: np.ndarray,
     human_probs: np.ndarray,
 ) -> np.ndarray:
     """
-    Compute Human Distribution Calibration Error (DistCE) per instance.
-    
-    Formula: DistCE(x) = TVD(f(x), π̄(x))
-    where TVD (Total Variation Distance) = 0.5 * ||p - q||_1
-    
+    Compute the instance-level Total Variation Distance (TVD) between
+    model predictive distributions and human annotation distributions.
+
+    In Baan et al. (2022), this quantity is referred to as
+    Distribution Calibration Error (DistCE), defined as:
+
+        DistCE(x) = TVD(f(x), π̄(x))
+
+    where:
+        - f(x) is the model predicted probability distribution
+        - π̄(x) is the empirical human label distribution
+
+    TVD is defined as:
+
+        TVD(p, q) = 0.5 * ||p - q||_1
+                  = 0.5 * sum_c |p_c - q_c|
+
+    Properties:
+        - TVD ∈ [0, 1]
+        - TVD = 0 iff the two distributions are identical
+        - TVD = 1 indicates maximal discrepancy
+
     Args:
-        model_probs: Model predicted probabilities (shape: [N, num_classes])
-        human_probs: Human annotation distribution (shape: [N, num_classes])
-        
+        model_probs: np.ndarray of shape [N, C]
+            Model predicted class probability distributions.
+        human_probs: np.ndarray of shape [N, C]
+            Human annotation distributions per instance.
+
     Returns:
-        Array of DistCE values per instance (shape: [N])
+        np.ndarray of shape [N]
+            Per-instance TVD (DistCE) values.
     """
+    model_probs = validate_and_fix_probs(model_probs, name="model_probs")
+    human_probs = validate_and_fix_probs(human_probs, name="human_probs")
+    
+    if model_probs.shape != human_probs.shape:
+        raise ValueError("model_probs and human_probs must have the same shape")
+    
+    # ----- TVD computation -----
     # TVD = 0.5 * L1 norm
     l1_norm = np.abs(model_probs - human_probs).sum(axis=1)
-    distce = 0.5 * l1_norm
+    tvd = 0.5 * l1_norm
     
-    return distce
+    return tvd
 
-def tvd(model_probs: np.ndarray, human_probs: np.ndarray, mean_per: Optional[str] = None):
+# def tvd(model_probs: np.ndarray, human_probs: np.ndarray, mean_per: Optional[str] = None):
+#     """
+#     Original TVD computation from Baan et al. (2022), allowing for multiple sub-samples and groups.
+#     Computes TVD scores allowing for multiple sub-samples and groups (=classifiers).
+
+#     p: classifiers [G, 1, N, C]
+#     q: MLE given (sub-samples of) annotations [1, S, N, C]
+
+#     returns:
+#         tvd: [G, S, N] (mean_per=None), [G, S] (mean_per=sample), [G, N] (mean_per=instance)
+#     """
+#     assert model_probs.max() <= 1.0 and model_probs.min() >= 0
+#     assert human_probs.max() <= 1.0 and human_probs.min() >= 0
+
+#     tvds = np.sum(np.abs(model_probs - human_probs), axis=-1) / 2
+#     if mean_per is not None:
+#         if mean_per == "instance":
+#             tvds = tvds.mean(1)
+#         elif mean_per == "sample":
+#             tvds = tvds.mean(2)
+#     return tvds
+
+# # Implementation from Beiduo's seeing the small through the big https://arxiv.org/abs/2406.17600
+
+# def kl_divergence(P, Q, epsilon=1e-10):
+#     """
+#     Calculate the Kullback-Leibler divergence between two probability distributions.
+
+#     Parameters:
+#     P (array-like): The first probability distribution.
+#     Q (array-like): The second probability distribution.
+#     epsilon (float): A small value to avoid division by zero.
+
+#     Returns:
+#     float: The KL divergence value.
+#     """
+#     # Convert P and Q to numpy arrays
+#     P = np.asarray(P, dtype=np.float64)
+#     Q = np.asarray(Q, dtype=np.float64)
+    
+#     # Add epsilon to avoid zero probabilities
+#     P = np.clip(P, epsilon, 1)
+#     Q = np.clip(Q, epsilon, 1)
+    
+#     # Normalize the distributions to ensure they sum to 1
+#     P = P / np.sum(P)
+#     Q = Q / np.sum(Q)
+    
+#     # Calculate KL divergence
+#     kl_divergence_value = np.sum(rel_entr(P, Q))
+    
+#     return kl_divergence_value
+
+
+# def jensen_shannon(p, q):
+#     # calculate JSD
+#     p = np.asarray(p, dtype=np.float64)
+#     q = np.asarray(q, dtype=np.float64)
+#     m = (p + q) / 2
+#     return math.sqrt((kl_divergence(p, m) + kl_divergence(q, m)) / 2)
+
+def compute_kl_human_to_pred(
+    pred_probs: np.ndarray,
+    human_probs: np.ndarray,
+    *,
+    epsilon: float = 1e-12,
+    atol: float = 1e-6,
+) -> np.ndarray:
     """
-    Original TVD computation from Baan et al. (2022), allowing for multiple sub-samples and groups.
-    Computes TVD scores allowing for multiple sub-samples and groups (=classifiers).
+    Compute per-sample Kullback–Leibler divergence: KL(human || pred), log is the natural logarithm (ln).
 
-    p: classifiers [G, 1, N, C]
-    q: MLE given (sub-samples of) annotations [1, S, N, C]
+    Definitions
+    ----------
+    Let p be the estimated human label distribution for a sample (a categorical distribution),
+    and q be the model's predicted probability distribution (e.g., softmax output).
 
-    returns:
-        tvd: [G, S, N] (mean_per=None), [G, S] (mean_per=sample), [G, N] (mean_per=instance)
-    """
-    assert model_probs.max() <= 1.0 and model_probs.min() >= 0
-    assert human_probs.max() <= 1.0 and human_probs.min() >= 0
+        p = (p_1, ..., p_K),  p_i >= 0,  sum_i p_i = 1
+        q = (q_1, ..., q_K),  q_i >= 0,  sum_i q_i = 1
 
-    tvds = np.sum(np.abs(model_probs - human_probs), axis=-1) / 2
-    if mean_per is not None:
-        if mean_per == "instance":
-            tvds = tvds.mean(1)
-        elif mean_per == "sample":
-            tvds = tvds.mean(2)
-    return tvds
+    The KL divergence from p to q is:
 
+        KL(p || q) = sum_{i=1..K} p_i * log( p_i / q_i )
 
+    Interpretation
+    ------------------------
+    KL(p || q) measures how well q approximates p, from the perspective of p:
 
-def compute_kl(P, Q, epsilon=1e-10):
-    """
-    Kullback–Leibler divergence KL(P || Q).
-
-    Notes
-    -----
-    - Both P and Q will be clipped by `epsilon` for numerical stability.
-    - Both distributions are re-normalized to ensure sum to 1.
-    - Natural logarithm (ln) is used internally.
-    """
-    P = np.asarray(P, dtype=np.float64)
-    Q = np.asarray(Q, dtype=np.float64)
-
-    # numerical stability
-    P = np.clip(P, epsilon, 1.0)
-    Q = np.clip(Q, epsilon, 1.0)
-
-    # normalize
-    P = P / np.sum(P)
-    Q = Q / np.sum(Q)
-
-    return np.sum(rel_entr(P, Q))  # ln-based KL
-
-
-def compute_jsd(
-    p,
-    q,
-    base=2,
-    epsilon=1e-10,
-):
-    """
-    Jensen–Shannon distance between two probability distributions.
-
-    This function returns the *Jensen–Shannon distance*, i.e.
-    the square root of the Jensen–Shannon divergence:
-
-        JSDist(p, q) = sqrt( ( KL(p || m) + KL(q || m) ) / 2 )
-
-    where m = (p + q) / 2.
+    - Larger KL means q assigns probability mass differently than humans do.
+    - It is *not symmetric*: KL(p || q) != KL(q || p) generally.
+    - In theory, KL ∈ [0, inf] 
+    - KL can be infinite if q_i == 0 for some i where p_i > 0.
+    - KL(p || q) = 0  iff  p == q (exact match)
+    - Here clipping q to [epsilon, 1] ensures numerical stability and prevents infinite KL values, so KL is actually bounded by -log(epsilon), for epsilon=1e-12, it is about 27.63.
 
     Parameters
     ----------
-    p, q : array-like
-        Input probability distributions.
-    base : float, optional (default=2)
-        Logarithm base used for the divergence.
-        - base = 2  → distance is bounded in [0, 1]
-        - base = e  → distance is bounded in [0, sqrt(ln 2)]
+    pred_probs : np.ndarray
+        Model probabilities q, shape [N, K].
+    human_probs : np.ndarray
+        Human probabilities p, shape [N, K].
     epsilon : float
-        Small value for clipping to avoid log(0).
+        Small value to avoid division by zero.
+    atol : float
+        Allowed tolerance for row sums being close to 1.
 
-    Notes
-    -----
-    - Internally uses natural logarithm and rescales by ln(base).
-    - Distributions are clipped and re-normalized for stability.
-    - If you want the Jensen–Shannon *divergence* instead of distance,
-      remove the final sqrt.
+    Returns
+    -------
+    np.ndarray
+        Per-sample KL values, shape [N].
     """
+    if pred_probs.shape != human_probs.shape:
+        raise ValueError("model_probs and human_probs must have the same shape")
 
-    p = np.asarray(p, dtype=np.float64)
-    q = np.asarray(q, dtype=np.float64)
+    p = validate_and_fix_probs(human_probs, name="human_probs", atol=atol)
+    q = validate_and_fix_probs(pred_probs, name="pred_probs", atol=atol)
 
-    # numerical stability
-    p = np.clip(p, epsilon, 1.0)
+    # ----- Numerical stability for KL computation -----
     q = np.clip(q, epsilon, 1.0)
 
-    # normalize
-    p = p / np.sum(p)
-    q = q / np.sum(q)
+    # Normalize the distributions to ensure they sum to 1
+    q = q / np.sum(q, axis=1, keepdims=True)
 
+    return np.sum(rel_entr(p, q), axis=1)
+
+def compute_jsd(
+    p: np.ndarray,
+    q: np.ndarray,
+    *,
+    base: float = 2.0,
+    epsilon: float = 1e-12,
+) -> np.ndarray:
+    """
+    Per-sample Jensen–Shannon distance.
+
+    JSD is defined as:
+
+    JSD(p, q) = sqrt( 0.5 * KL(p || m) + 0.5 * KL(q || m) )
+    where m = 0.5 * (p + q)
+
+    JSD is a symmetric and smoothed version of KL divergence, and is always finite and bounded.
+
+    Properties:
+    ----------
+    - JSD is in the range [0, sqrt(log_b(2))] where b is the log base.
+    - JSD(p, q) = 0 iff p == q
+    - JSD(p, q) = sqrt(log_b(2)) indicates maximal divergence, which occurs when p and q are completely disjoint distributions (e.g., p=[1,0], q=[0,1]).
+    - So only if base=2, result is in [0, 1].
+    - JSD is symmetric: JSD(p, q) = JSD(q, p)
+
+    Parameters
+    ----------
+    p : np.ndarray  
+        First probability distribution (e.g., human), shape [N, K].
+    q : np.ndarray
+        Second probability distribution (e.g., model), shape [N, K].
+    base : float
+        Logarithm base for normalization. If base=2, JSD is in [0, 1].
+    epsilon : float
+        Small value to avoid zero probabilities.
+
+    Returns
+    -------
+    np.ndarray
+        Per-sample JSD values, shape [N].
+    """
     m = 0.5 * (p + q)
 
-    js_div = 0.5 * (
-        compute_kl(p, m, epsilon=epsilon)
-        + compute_kl(q, m, epsilon=epsilon)
-    )
+    left = compute_kl_human_to_pred(m, p, epsilon=epsilon)   # KL(p||m) in ln
+    right = compute_kl_human_to_pred(m, q, epsilon=epsilon)  # KL(q||m) in ln
+    jsd = 0.5 * (left + right)              # JSD in ln
 
-    # change log base if needed
     if base is not None:
-        js_div /= math.log(base)
+        jsd = jsd / np.log(base)
 
-    # return distance (not divergence)
-    return math.sqrt(js_div)
+    return np.sqrt(jsd)
+
+"""
+Kemal's soft f1 https://arxiv.org/abs/2502.01891
+"""
+
+def compute_soft_micro_f1(model_probs, human_probs):
+    min_sum = np.minimum(model_probs, human_probs).sum()
+    denom = (model_probs + human_probs).sum()
+    if denom == 0:
+        return 0.0
+    return 2.0 * min_sum / denom
+
+def compute_soft_macro_f1(model_probs, human_probs):
+    min_sum = np.minimum(model_probs, human_probs).sum(axis=0)
+    pred_sum = model_probs.sum(axis=0)
+    true_sum = human_probs.sum(axis=0)
+    denom = pred_sum + true_sum
+
+    mask = denom > 0
+    if not np.any(mask):
+        return 0.0
+
+    f1 = 2.0 * min_sum[mask] / denom[mask]
+    return float(f1.mean())
 
 
-# def entropy(probs: np.ndarray, axis: int = -1) -> np.ndarray:
-#     """
-#     Compute entropy of probability distributions.
-    
-#     Args:
-#         probs: Probability distributions (shape: [..., num_classes])
-#         axis: Axis along which to compute entropy
-        
-#     Returns:
-#         Entropy values (shape: probs.shape without axis dimension)
-#     """
-#     eps = 1e-10
-#     return -np.sum(probs * np.log(probs + eps), axis=axis)
+"""
+Beiduo's global corre from seeing the small through the big https://arxiv.org/abs/2406.17600
+"""
+def compute_distance_correlation(
+    x: np.ndarray,
+    y: np.ndarray,
+    *,
+    exponent: float = 1.0,
+) -> float:
+    """
+    Biased estimator of distance correlation between two random vectors.
+
+    Inputs are expected as [N, D], where rows are instances and columns are
+    variables.
+    """
+
+    return float(dcor.distance_correlation(x, y, exponent=exponent))

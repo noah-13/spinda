@@ -86,6 +86,14 @@ python main.py evaluate \
     --output_file chaosnli_results.json
 
 # By default, evaluation also saves a DistCE distribution plot to outputs/figures/.
+# You can also save ternary plots (model vs human distributions) with:
+python main.py evaluate \
+    --predictions predictions.jsonl \
+    --ground_truth_source chaosnli \
+    --chaosnli_path ./data/chaosNLI_v1.0/chaosNLI_snli.jsonl \
+    --output_file chaosnli_results.json \
+    --plots distce ternary
+#
 # Disable plotting with:
 python main.py evaluate \
     --predictions predictions.jsonl \

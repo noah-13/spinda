@@ -3,10 +3,9 @@
 Evaluation script for NLI predictions.
 
 Example usage:
-    python -m nli_toolkits.scripts.evaluate \
-        --predictions predictions.jsonl \
-        --ground_truth_source snli_test.jsonl \
-        --output_file results.json
+    uv run python -m nli_toolkits.scripts.evaluate\
+        --predictions outputs/predictions/toolkit_preds.jsonl\
+        --ground_truth_source chaosnli
 """
 
 import argparse
@@ -15,17 +14,15 @@ import re
 from pathlib import Path
 from typing import List, Optional
 
-import numpy as np
-
 from nli_toolkits.data import (
     ChaosNLIReader,
     NLIDistributionSample,
-    NLISample,
     SNLIReader,
     PredictionRecord,
-    NLI_NUM_LABELS
 )
-from nli_toolkits.eval import Evaluator, compute_distce
+from nli_toolkits.eval import Evaluator
+from nli_toolkits.visualization import save_tvd_plot, save_ternary_plot
+from nli_toolkits.eval.metrics import compute_tvd
 
 
 def _parse_chaosnli_preds_line(
@@ -138,85 +135,6 @@ def load_predictions(
     return predictions
 
 
-def save_distce_plot_sns(
-    distce: np.ndarray,
-    output_path: Path,
-    title: str | None = None,
-    bins: int = 30,
-) -> bool:
-    try:
-        import matplotlib.pyplot as plt
-        import seaborn as sns
-    except ImportError:
-        return False
-
-    values = distce.astype(float)
-    values = values[np.isfinite(values)]
-    if values.size == 0:
-        return True
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    try:
-        with plt.style.context("seaborn-v0_8-darkgrid"):
-            fig, axes = plt.subplots(nrows=1, ncols=1, figsize=(10, 5))
-    except Exception:
-        fig, axes = plt.subplots(nrows=1, ncols=1, figsize=(10, 5))
-
-    sns.histplot(
-    values,
-    binwidth=1 / bins,
-    binrange=(0, 1),
-    kde=True,
-    stat="probability",
-    ax=axes,
-    )
-
-
-    axes.set(xlabel="DistCE (TVD)")
-    axes.set(title=title)
-    axes.set(ylim=(0, 0.135))
-
-    fig.tight_layout()
-    fig.savefig(output_path)
-    plt.close(fig)
-
-    return True
-
-
-
-def compute_distce_values(
-    predictions: List[PredictionRecord],
-    ground_truth: List[NLIDistributionSample],
-) -> np.ndarray:
-    gt_dict = {gt.id: gt for gt in ground_truth}
-
-    pred_probs_list = []
-    human_probs_list = []
-
-    for pred in predictions:
-        gt = gt_dict.get(pred.id)
-        if gt is None:
-            continue
-
-        pred_label = pred.outputs.get("pred", -1)
-        probs = pred.outputs.get("probs", [])
-        if pred_label < 0 or len(probs) != NLI_NUM_LABELS:
-            continue
-        if len(gt.human_dist) != NLI_NUM_LABELS:
-            continue
-
-        pred_probs_list.append(probs)
-        human_probs_list.append(gt.human_dist)
-
-    if not pred_probs_list:
-        return np.array([], dtype=float)
-
-    pred_probs = np.array(pred_probs_list, dtype=float)
-    human_probs = np.array(human_probs_list, dtype=float)
-    return compute_distce(pred_probs, human_probs)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate NLI predictions")
     
@@ -254,14 +172,14 @@ def main() -> None:
     parser.add_argument(
         "--chaosnli_path",
         type=str,
-        default=None,
+        default="chaosNLI_v1.0/chaosNLI_snli.jsonl",
         help="Path to ChaosNLI JSONL file (required if ground_truth_source=chaosnli)",
     )
     
     parser.add_argument(
         "--output_file",
         type=str,
-        default="evaluation_results.json",
+        default="outputs/results/evaluation_results.json",
         help="Output file for evaluation results",
     )
 
@@ -269,7 +187,18 @@ def main() -> None:
         "--plot",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Whether to save DistCE distribution plot (default: enabled)",
+        help="Whether to save plots (default: enabled)",
+    )
+
+    parser.add_argument(
+        "--plots",
+        nargs="+",
+        default=["tvd", "ternary"],
+        choices=["tvd", "ternary"],
+        help=(
+            "Plot types to save (default: tvd, ternary). "
+            "Use as: --plots tvd ternary"
+        ),
     )
 
     parser.add_argument(
@@ -314,36 +243,19 @@ def main() -> None:
     # Diagnostics: how many predictions can be matched to ground truth?
     gt_dict = {gt.id: gt for gt in ground_truth}
     overlap = sum(1 for p in predictions if p.id in gt_dict)
-    valid = 0
-    if ground_truth and isinstance(ground_truth[0], NLIDistributionSample):
-        for p in predictions:
-            gt = gt_dict.get(p.id)
-            if gt is None or not isinstance(gt, NLIDistributionSample):
-                continue
-            pred_label = p.outputs.get("pred", -1)
-            probs = p.outputs.get("probs", [])
-            if pred_label < 0 or len(probs) != NLI_NUM_LABELS:
-                continue
-            if len(getattr(gt, "human_dist", [])) != NLI_NUM_LABELS:
-                continue
-            valid += 1
-    else:
-        for p in predictions:
-            gt = gt_dict.get(p.id)
-            if gt is None or not isinstance(gt, NLISample):
-                continue
-            pred_label = p.outputs.get("pred", -1)
-            probs = p.outputs.get("probs", [])
-            if pred_label < 0 or len(probs) != NLI_NUM_LABELS:
-                continue
-            valid += 1
     print(f"Matched prediction IDs: {overlap}/{len(predictions)}")
-    print(f"Valid pairs used for metrics: {valid}/{len(predictions)}")
     
     # Evaluate
     print("Computing metrics...")
     evaluator = Evaluator()
-    results = evaluator.evaluate(predictions, ground_truth)
+    eval_output = evaluator.evaluate(predictions, ground_truth)
+    results = eval_output.metrics
+
+    if ground_truth and isinstance(ground_truth[0], NLIDistributionSample):
+        valid = 0 if eval_output.pred_probs is None else len(eval_output.pred_probs)
+    else:
+        valid = 0 if eval_output.pred_labels is None else len(eval_output.pred_labels)
+    print(f"Valid pairs used for metrics: {valid}/{len(predictions)}")
     
     # Print results
     print("\n" + "=" * 50)
@@ -362,25 +274,44 @@ def main() -> None:
     
     print(f"\nResults saved to {output_path}")
 
-    # Optional plot (DistCE distribution)
+    # Optional plots
     if args.plot and ground_truth and isinstance(ground_truth[0], NLIDistributionSample):
-        distce = compute_distce_values(
-            predictions,
-            [gt for gt in ground_truth if isinstance(gt, NLIDistributionSample)],
-        )
-
+        selected_plots = set(args.plots)
         plot_dir = Path(args.plot_dir)
-        plot_path = plot_dir / f"{Path(args.predictions).stem}_distce.png"
         title = args.plot_title or Path(args.predictions).stem
 
-        ok = save_distce_plot_sns(distce, plot_path, title=title)
-        if ok:
-            print(f"DistCE plot saved to {plot_path}")
-        else:
-            print(
-                "Plotting skipped: matplotlib is not installed. "
-                "Install with `pip install -e \".[plot]\"` or use `--no-plot`."
+        if "tvd" in selected_plots:
+            tvd = compute_tvd(eval_output.pred_probs, eval_output.human_probs)
+            if tvd is None:
+                print("DistCE plot skipped: no distribution artifacts were returned.")
+                return
+            plot_path = plot_dir / f"{Path(args.predictions).stem}_tvd.png"
+            ok = save_tvd_plot(tvd, plot_path, title=title)
+            if ok:
+                print(f"DistCE plot saved to {plot_path}")
+            else:
+                print(
+                    "Plotting skipped: matplotlib is not installed. "
+                    "Install with `pip install -e \".[plot]\"` or use `--no-plot`."
+                )
+
+        if "ternary" in selected_plots:
+            plot_path = plot_dir / f"{Path(args.predictions).stem}_ternary.png"
+            ok = save_ternary_plot(
+                distributions=[eval_output.pred_probs, eval_output.human_probs],
+                output_path=plot_path,
+                dataset_names=["Model", "Human"],
+                colors=["k", "tab:orange"],
+                markers=["D", "v"],
+                title=title,
             )
+            if ok:
+                print(f"Ternary plot saved to {plot_path}")
+            else:
+                print(
+                    "Ternary plotting skipped: install `python-ternary` "
+                    "and matplotlib, or use --plots tvd."
+                )
 
 
 if __name__ == "__main__":

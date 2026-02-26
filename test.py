@@ -1,4 +1,6 @@
-from scipy.spatial.distance import jensenshannon
+import torch
 
-print(jensenshannon([1.0, 0.0], [0.0, 1.0]))
-print(jensenshannon([1.0, 0.0], [0.0, 1.0], base=2))
+positions = torch.randn(10, 3)
+x = positions.expand(10, -1, -1)
+print(x.shape)
+                         

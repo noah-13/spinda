@@ -5,172 +5,200 @@ import pytest
 import math
 
 from nli_toolkits.eval.metrics import (
-    compute_distce,
-    compute_kl,
+    validate_and_fix_probs,
+    compute_tvd,
+    compute_distance_correlation,
     compute_jsd,
+    compute_kl_human_to_pred,
+    compute_soft_macro_f1,
+    compute_soft_micro_f1,
+
 )
 
+""" 
+If you want to test only metrics, you can run this file directly with pytest:
+pytest tests/test_metrics.py
 
-# def test_compute_ece_perfect_calibration():
-#     """Test ECE with perfectly calibrated predictions."""
-#     n = 1000
-#     # Create perfectly calibrated scenario:
-#     # For each confidence level, accuracy equals confidence
-#     # We'll use multiple confidence levels to test binning
-#     num_bins = 10
-#     bin_size = n // num_bins
+If you want to test one specific metric, you can use class name or function name:
+pytest tests/test_metrics.py::TestProb
+"""
+
+class TestProb:
+    """Tests for validating input probabilities for metrics."""
+
+    def test_negative_probs_raise(self):
+        p = np.array([[0.5, -0.1, 0.6]])
+
+        with pytest.raises(ValueError, match="negative values"):
+            validate_and_fix_probs(p)
+
+    def test_not_normalized_probs_raise(self):
+        p = np.array([[0.2, 0.2, 0.2]])  # sums to 0.6
+
+        with pytest.raises(ValueError, match="sum to 1"):
+            validate_and_fix_probs(p)
+
+    def test_valid_probs_pass(self):
+        p = np.array([[0.5, 0.3, 0.2]])
+        fixed = validate_and_fix_probs(p)
+
+        assert np.allclose(fixed, p, atol=1e-6)  # valid probabilities should be unchanged
     
-#     predictions = []
-#     confidences = []
-#     labels = []
+    def test_infite_or_non_probs_raise(self):
+        p = np.array([[0.5, 0.3, np.inf]])
+        q = np.array([[0.5, 0.3, np.nan]])
+
+        with pytest.raises(ValueError, match="inf"):
+            validate_and_fix_probs(p)
+        with pytest.raises(ValueError, match="NaN"):
+            validate_and_fix_probs(q)
     
-#     np.random.seed(42)  # For reproducibility
-#     for i in range(num_bins):
-#         # Confidence for this bin (0.1 to 1.0)
-#         conf = (i + 1) / num_bins
-#         # Create bin_size samples with this confidence
-#         for j in range(bin_size):
-#             pred = np.random.randint(0, 3)
-#             predictions.append(pred)
-#             confidences.append(conf)
             
-#             # For perfect calibration: accuracy should equal confidence
-#             # So if confidence is c, then c fraction should be correct
-#             # Use random to decide if this prediction is correct
-#             is_correct = np.random.random() < conf
-#             if is_correct:
-#                 labels.append(pred)  # Correct prediction
-#             else:
-#                 # Wrong prediction: choose a different label
-#                 wrong_label = (pred + 1) % 3
-#                 labels.append(wrong_label)
-    
-#     predictions = np.array(predictions)
-#     confidences = np.array(confidences)
-#     labels = np.array(labels)
-    
-#     ece = compute_ece(predictions, confidences, labels, num_bins=num_bins)
-    
-#     # Should be close to 0 for perfect calibration
-#     assert ece >= 0
-#     assert ece < 0.1  # Allow some numerical error due to randomness
+class TestTVD:
+    def test_compute_tvd_values(self):
+        """Correctness tests for TVD values."""
+
+        # Batch with different rows
+        model_probs = np.array([
+            [0.5, 0.5, 0.0],  # vs [0,1,0] -> tvd = ||0.5-0| + |0.5-1| + |0-0| = 0.5 (partially overlapping)
+            [1.0, 0.0, 0.0],  # vs [0,0,1] -> tvd = ||1-0| + |0-0| + |0-1| = 1.0 (completely different)
+            [0.2, 0.3, 0.5],  # same -> tvd = ||0.2-0.2| + |0.3-0.3| + |0.5-0.5| = 0.0 (identical)
+        ])
+        human_probs = np.array([
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.2, 0.3, 0.5],
+        ])
+
+        tvd = compute_tvd(model_probs, human_probs)
+        assert tvd.shape == (3,)
+        assert tvd == pytest.approx([0.5, 1.0, 0.0], abs=1e-6)
 
 
-# def test_compute_ece_miscalibrated():
-#     """Test ECE with miscalibrated predictions."""
-#     n = 1000
-#     predictions = np.random.randint(0, 3, n)
-#     confidences = np.ones(n) * 0.9  # High confidence
-#     labels = np.random.randint(0, 3, n)  # Random labels (low accuracy)
-    
-#     ece = compute_ece(predictions, confidences, labels)
-#     # Should be high for miscalibration
-#     assert ece > 0.5
+    def test_compute_invalid_shape_raises(self):
+        p = np.array([[0.5, 0.5]])
+        q = np.array([[0.5, 0.5], [0.5, 0.5]])
+
+        with pytest.raises(ValueError, match="same shape"):
+            compute_tvd(p, q)
+
+class TestKL:
+    def test_compute_invalid_shape_raises(self):
+        p = np.array([[0.5, 0.5]])
+        q = np.array([[0.5, 0.5], [0.5, 0.5]])
+
+        with pytest.raises(ValueError, match="same shape"):
+            compute_kl_human_to_pred(p, q)
+
+    def test_kl_values(self):
+        human = np.array([
+            [0.5, 0.5],   # [0.5, 0.5] vs [0.5, 0.5] -> KL = 0 (identical)
+            [0.1, 0.9],   # [0.1, 0.9] vs [0.8, 0.2] -> KL > 0 (different)
+            [0.25, 0.75], # [0.25, 0.75] vs [0.5, 0.5] -> KL > 0 (different)
+        ])
+
+        pred = np.array([
+            [0.5, 0.5],
+            [0.8, 0.2],
+            [0.5, 0.5],
+        ])
+        
+        epsilon = 1e-12
+        kl = compute_kl_human_to_pred(pred, human, epsilon=epsilon)
+
+        assert kl.shape == (3,)
+        assert kl[0] == pytest.approx(0.0, abs=1e-6)
+        assert 0 < kl[1] < -np.log(epsilon)  # should be positive and less than -log(epsilon)
+        assert 0 < kl[2] < -np.log(epsilon)
+        assert kl[1] > kl[2]  # the second case should have higher KL than the third since it's more different from human distribution
+
+    def test_kl_zero_case(self):
+        human = np.array([[1.0, 0.0]])
+        pred = np.array([[0.0, 1.0]])
+
+        epsilon = 1e-12
+        kl = compute_kl_human_to_pred(pred, human, epsilon=epsilon)
+        assert kl.shape == (1,)
+        assert kl[0] == pytest.approx(-np.log(epsilon), abs=1e-6)  # KL should be -log(epsilon) due to clipping, which is about 27.63 for epsilon=1e-12
+
+class TestJSD:
+    def test_compute_jsd(self):
+        """Test JSD computation."""
+        p = np.array([
+            [0.7, 0.2, 0.1], # vs [0.6, 0.3, 0.1] -> JSD > 0 (different)
+            [0.0, 0.0, 1.0], # vs [0.0, 0.0, 1.0] -> JSD = 1 (completely different)
+            [0.2, 0.3, 0.5], # vs [0.2, 0.3, 0.5] -> JSD = 0 (identical)
+            ])
+        
+        q = np.array([
+            [0.6, 0.3, 0.1],
+            [1.0, 0.0, 0.0],
+            [0.2, 0.3, 0.5],
+            ])
+        
+        d = compute_jsd(p, q)
+        # JSD should be non-negative and at most 1 for two distributions
+        assert d.shape == (3,)
+
+        assert 0 < d[0] < 1         # JSD should be between 0 and 1 for different distributions
+        assert d[1] == pytest.approx(1.0, abs=1e-6)
+        assert d[2] == pytest.approx(0.0, abs=1e-6)         # JSD should be 0 if distributions are the same
 
 
-# def test_compute_entce():
-#     """Test EntCE computation."""
-#     n = 10
-#     num_classes = 3
-    
-#     # Model predictions (uniform)
-#     model_probs = np.ones((n, num_classes)) / num_classes
-    
-#     # Human distribution (also uniform)
-#     human_probs = np.ones((n, num_classes)) / num_classes
-    
-#     entce = compute_entce(model_probs, human_probs)
-#     assert entce.shape == (n,)
-#     # Should be close to 0 when entropies match
-#     assert np.allclose(entce, 0.0, atol=1e-6)
+def test_compute_soft_micro_f1():
+    """Test soft micro F1 with known value."""
+    model_probs = np.array([[0.8, 0.2], [0.1, 0.9]])
+    human_probs = np.array([[1.0, 0.0], [0.0, 1.0]])
+
+    # min_sum = 0.8 + 0.0 + 0.0 + 0.9 = 1.7
+    # denom = sum(model + human) = 4.0
+    # f1 = 2 * 1.7 / 4 = 0.85
+    assert np.allclose(compute_soft_micro_f1(model_probs, human_probs), 0.85, atol=1e-6)
 
 
-# def test_compute_rankcs_perfect_match():
-#     """Test RankCS with perfect ranking match."""
-#     n = 10
-#     num_classes = 3
-    
-#     # Same distributions
-#     model_probs = np.array([[0.7, 0.2, 0.1], [0.5, 0.3, 0.2]] * (n // 2))
-#     human_probs = model_probs.copy()
-    
-#     rankcs = compute_rankcs(model_probs, human_probs)
-#     assert rankcs == 1.0
+def test_compute_soft_micro_f1_zero_denom():
+    """Test soft micro F1 zero denominator edge case."""
+    model_probs = np.zeros((2, 3))
+    human_probs = np.zeros((2, 3))
+    assert compute_soft_micro_f1(model_probs, human_probs) == 0.0
 
 
-# def test_compute_rankcs_no_match():
-#     """Test RankCS with completely different rankings."""
-#     n = 10
-#     num_classes = 3
-    
-#     # Opposite rankings
-#     model_probs = np.array([[0.7, 0.2, 0.1]] * n)
-#     human_probs = np.array([[0.1, 0.2, 0.7]] * n)
-    
-#     rankcs = compute_rankcs(model_probs, human_probs)
-#     assert rankcs == 0.0
+def test_compute_soft_macro_f1():
+    """Test soft macro F1 with class-wise averaging."""
+    model_probs = np.array([[0.8, 0.2], [0.1, 0.9]])
+    human_probs = np.array([[1.0, 0.0], [0.0, 1.0]])
+
+    # class 0: 2 * 0.8 / (0.9 + 1.0) = 1.6 / 1.9
+    # class 1: 2 * 0.9 / (1.1 + 1.0) = 1.8 / 2.1
+    expected = ((1.6 / 1.9) + (1.8 / 2.1)) / 2
+    assert np.allclose(compute_soft_macro_f1(model_probs, human_probs), expected, atol=1e-6)
 
 
-def test_compute_distce():
-    """Test DistCE computation."""
-    n = 10
-    
-    # Model predictions
-    model_probs = np.array([[0.7, 0.2, 0.1]] * n)
-    
-    # Human distribution (same)
-    human_probs = model_probs.copy()
-    
-    distce = compute_distce(model_probs, human_probs)
-    assert distce.shape == (n,)
-    # Should be 0 for identical distributions
-    assert np.allclose(distce, 0.0, atol=1e-6)
+def test_compute_soft_macro_f1_all_zero():
+    """Test soft macro F1 when all class denominators are zero."""
+    model_probs = np.zeros((3, 2))
+    human_probs = np.zeros((3, 2))
+    assert compute_soft_macro_f1(model_probs, human_probs) == 0.0
 
 
-def test_compute_distce_different():
-    """Test DistCE with different distributions."""
-    
-    # Model: [1.0, 0.0, 0.0]
-    model_probs = np.array([[1.0, 0.0, 0.0]])
-    
-    # Human: [0.0, 0.0, 1.0]
-    human_probs = np.array([[0.0, 0.0, 1.0]])
-    
-    distce = compute_distce(model_probs, human_probs)
-    # TVD = 0.5 * (|1-0| + |0-0| + |0-1|) = 0.5 * 2 = 1.0
-    assert np.allclose(distce, 1.0, atol=1e-6)
+def test_compute_distance_correlation_doc_example():
+    """Matches the documented dcor example for distance correlation."""
+    a = np.array(
+        [
+            [1.0, 2.0, 3.0, 4.0],
+            [5.0, 6.0, 7.0, 8.0],
+            [9.0, 10.0, 11.0, 12.0],
+            [13.0, 14.0, 15.0, 16.0],
+        ]
+    )
+    b = np.array([[1.0], [0.0], [0.0], [1.0]])
 
-def test_compute_kl():
-    """Test KL divergence computation."""
-    p = np.array([[0.7, 0.2, 0.1]])
-    q = np.array([[0.6, 0.3, 0.1]])
-    
-    kl = compute_kl(p, q)
-    # KL should be non-negative
-    assert kl >= 0
-    # KL should be 0 if distributions are the same
-    assert compute_kl(p, p) < 1e-6 
+    d = compute_distance_correlation(a, b)
+    assert np.allclose(d, 0.5266403, atol=1e-6)
 
-def test_compute_jsd():
-    """Test JSD computation."""
-    p = np.array([[0.7, 0.2, 0.1]])
-    q = np.array([[0.6, 0.3, 0.1]])
-    
-    jsd = compute_jsd(p, q)
-    # JSD should be non-negative and at most log(2) for two distributions
-    assert jsd >= 0
-    assert jsd <= 1
-    # JSD should be 0 if distributions are the same
-    assert compute_jsd(p, p) < 1e-6
 
-def test_compute_jsd_maximum():
-    """Test JSD with completely different distributions."""
-    p = np.array([[1.0, 0.0, 0.0]])
-    q = np.array([[0.0, 0.0, 1.0]])
-    
-    jsd_base_e = compute_jsd(p, q, base=math.e)
-    # For two completely different distributions, JSD should be log(2)
-    assert np.allclose(jsd_base_e, math.sqrt(math.log(2)), atol=1e-6)
-    jsd_base_2 = compute_jsd(p, q)
-    # JSD should be the same regardless of log base since it's a ratio
-    assert np.allclose(jsd_base_2, 1, atol=1e-6)
+def test_compute_distance_correlation_self_is_one():
+    """Distance correlation should be 1.0 against itself."""
+    x = np.array([[0.2, 0.8], [0.6, 0.4], [0.9, 0.1], [0.3, 0.7]])
+    d = compute_distance_correlation(x, x)
+    assert np.allclose(d, 1.0, atol=1e-6)
