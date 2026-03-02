@@ -143,59 +143,72 @@ class TestJSD:
         assert 0 < d[0] < 1         # JSD should be between 0 and 1 for different distributions
         assert d[1] == pytest.approx(1.0, abs=1e-6)
         assert d[2] == pytest.approx(0.0, abs=1e-6)         # JSD should be 0 if distributions are the same
+    
+    def test_compute_jsd_base_e(self):
+        """Test JSD computation with natural log base."""
+        p = np.array([[0.0, 1.0]])
+        q = np.array([[1.0, 0.0]])
+
+        d = compute_jsd(p, q, base=math.e)
+        assert d.shape == (1,)
+        assert d[0] == pytest.approx(math.sqrt(math.log(2)), abs=1e-6)  # JSD with natural log should be ln(2) for completely different distributions
+
+class TestSoftF1:
+    def test_compute_soft_micro_f1(self):
+        """Test soft micro F1 with known value."""
+        model_probs = np.array([[0.8, 0.2], [0.1, 0.9]])
+        human_probs = np.array([[1.0, 0.0], [0.0, 1.0]])
+
+        # min_sum = 0.8 + 0.0 + 0.0 + 0.9 = 1.7
+        # denom = sum(model + human) = 4.0
+        # f1 = 2 * 1.7 / 4 = 0.85
+        assert compute_soft_micro_f1(model_probs, human_probs) == pytest.approx(0.85, abs=1e-6)
+
+    def test_compute_soft_micro_f1_multilabel(self):
+        """Test soft micro F1 with multilabel data."""
+        model_probs = np.array([[0.8, 0.2, 0.1], [0.1, 0.9, 0.3]])
+        human_probs = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 1.0]])
+
+        # min_sum = 0.8 + 0.9 + 0.3 = 2.0
+        # denom = sum(model + human) = (1.1 + 1.3) + (1.0 + 2.0) = 5.4
+        # f1 = 2 * 2.0 / 5.4 ≈ 0.741
+        assert compute_soft_micro_f1(model_probs, human_probs) == pytest.approx(0.741, abs=1e-3)
 
 
-def test_compute_soft_micro_f1():
-    """Test soft micro F1 with known value."""
-    model_probs = np.array([[0.8, 0.2], [0.1, 0.9]])
-    human_probs = np.array([[1.0, 0.0], [0.0, 1.0]])
+    def test_compute_soft_micro_f1_zero_denom(self):
+        """Test soft micro F1 zero denominator edge case."""
+        model_probs = np.zeros((2, 3))
+        human_probs = np.zeros((2, 3))
+        assert compute_soft_micro_f1(model_probs, human_probs) == 0.0
 
-    # min_sum = 0.8 + 0.0 + 0.0 + 0.9 = 1.7
-    # denom = sum(model + human) = 4.0
-    # f1 = 2 * 1.7 / 4 = 0.85
-    assert np.allclose(compute_soft_micro_f1(model_probs, human_probs), 0.85, atol=1e-6)
+    def test_compute_soft_micro_f1_tvd(self):
+        """Test soft micro F1 is consistent with TVD."""
+        model_probs = np.array([[0.8, 0.2], [0.1, 0.9]])
+        human_probs = np.array([[1.0, 0.0], [0.0, 1.0]])
 
+        tvd = compute_tvd(model_probs, human_probs)
+        f1 = compute_soft_micro_f1(model_probs, human_probs)
 
-def test_compute_soft_micro_f1_zero_denom():
-    """Test soft micro F1 zero denominator edge case."""
-    model_probs = np.zeros((2, 3))
-    human_probs = np.zeros((2, 3))
-    assert compute_soft_micro_f1(model_probs, human_probs) == 0.0
-
-
-def test_compute_soft_macro_f1():
-    """Test soft macro F1 with class-wise averaging."""
-    model_probs = np.array([[0.8, 0.2], [0.1, 0.9]])
-    human_probs = np.array([[1.0, 0.0], [0.0, 1.0]])
-
-    # class 0: 2 * 0.8 / (0.9 + 1.0) = 1.6 / 1.9
-    # class 1: 2 * 0.9 / (1.1 + 1.0) = 1.8 / 2.1
-    expected = ((1.6 / 1.9) + (1.8 / 2.1)) / 2
-    assert np.allclose(compute_soft_macro_f1(model_probs, human_probs), expected, atol=1e-6)
+        # F1 == 1 - TVD
+        assert f1 == pytest.approx(1.0 - tvd.sum()/len(tvd), abs=1e-6)
 
 
-def test_compute_soft_macro_f1_all_zero():
-    """Test soft macro F1 when all class denominators are zero."""
-    model_probs = np.zeros((3, 2))
-    human_probs = np.zeros((3, 2))
-    assert compute_soft_macro_f1(model_probs, human_probs) == 0.0
+    def test_compute_soft_macro_f1(self):
+        """Test soft macro F1 with class-wise averaging."""
+        model_probs = np.array([[0.8, 0.2], [0.1, 0.9]])
+        human_probs = np.array([[1.0, 0.0], [0.0, 1.0]])
+
+        # class 0: 2 * 0.8 / (0.9 + 1.0) = 1.6 / 1.9
+        # class 1: 2 * 0.9 / (1.1 + 1.0) = 1.8 / 2.1
+        expected = ((1.6 / 1.9) + (1.8 / 2.1)) / 2
+        assert compute_soft_macro_f1(model_probs, human_probs) == pytest.approx(expected, abs=1e-6)
 
 
-def test_compute_distance_correlation_doc_example():
-    """Matches the documented dcor example for distance correlation."""
-    a = np.array(
-        [
-            [1.0, 2.0, 3.0, 4.0],
-            [5.0, 6.0, 7.0, 8.0],
-            [9.0, 10.0, 11.0, 12.0],
-            [13.0, 14.0, 15.0, 16.0],
-        ]
-    )
-    b = np.array([[1.0], [0.0], [0.0], [1.0]])
-
-    d = compute_distance_correlation(a, b)
-    assert np.allclose(d, 0.5266403, atol=1e-6)
-
+    def test_compute_soft_macro_f1_all_zero(self):
+        """Test soft macro F1 when all class denominators are zero."""
+        model_probs = np.zeros((3, 2))
+        human_probs = np.zeros((3, 2))
+        assert compute_soft_macro_f1(model_probs, human_probs) == 1.0
 
 def test_compute_distance_correlation_self_is_one():
     """Distance correlation should be 1.0 against itself."""

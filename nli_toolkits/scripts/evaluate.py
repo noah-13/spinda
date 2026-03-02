@@ -17,11 +17,16 @@ from typing import List, Optional
 from nli_toolkits.data import (
     ChaosNLIReader,
     NLIDistributionSample,
+    NLI_NUM_LABELS,
     SNLIReader,
     PredictionRecord,
 )
 from nli_toolkits.eval import Evaluator
-from nli_toolkits.visualization import save_tvd_plot, save_ternary_plot
+from nli_toolkits.visualization import (
+    save_distribution_ternary_plot,
+    save_interactive_distribution_ternary_plot,
+    save_tvd_plot,
+)
 from nli_toolkits.eval.metrics import compute_tvd
 
 
@@ -135,6 +140,34 @@ def load_predictions(
     return predictions
 
 
+def _collect_distribution_plot_metadata(
+    predictions: List[PredictionRecord],
+    ground_truth: List[NLIDistributionSample],
+) -> tuple[list[str], list[str], list[str]]:
+    gt_dict = {gt.id: gt for gt in ground_truth}
+    ids: list[str] = []
+    premises: list[str] = []
+    hypotheses: list[str] = []
+
+    for pred in predictions:
+        gt = gt_dict.get(pred.id)
+        if gt is None:
+            continue
+
+        pred_label = pred.outputs.get("pred", -1)
+        probs = pred.outputs.get("probs", [])
+        if pred_label < 0 or len(probs) != NLI_NUM_LABELS:
+            continue
+        if len(gt.human_dist) != NLI_NUM_LABELS:
+            continue
+
+        ids.append(str(gt.id))
+        premises.append(str(gt.premise))
+        hypotheses.append(str(gt.hypothesis))
+
+    return ids, premises, hypotheses
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate NLI predictions")
     
@@ -214,6 +247,21 @@ def main() -> None:
         default=None,
         help="Optional title for the plot (default: predictions file stem)",
     )
+
+    parser.add_argument(
+        "--ternary_source",
+        type=str,
+        default="both",
+        choices=["model", "human", "both"],
+        help="Which distribution source to visualize in ternary plot (default: both).",
+    )
+
+    parser.add_argument(
+        "--ternary_browser",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Whether to also save an interactive browser ternary plot as HTML (default: enabled).",
+    )
     
     args = parser.parse_args()
     
@@ -279,6 +327,7 @@ def main() -> None:
         selected_plots = set(args.plots)
         plot_dir = Path(args.plot_dir)
         title = args.plot_title or Path(args.predictions).stem
+        ids, premises, hypotheses = _collect_distribution_plot_metadata(predictions, ground_truth)
 
         if "tvd" in selected_plots:
             tvd = compute_tvd(eval_output.pred_probs, eval_output.human_probs)
@@ -297,12 +346,11 @@ def main() -> None:
 
         if "ternary" in selected_plots:
             plot_path = plot_dir / f"{Path(args.predictions).stem}_ternary.png"
-            ok = save_ternary_plot(
-                distributions=[eval_output.pred_probs, eval_output.human_probs],
+            ok = save_distribution_ternary_plot(
+                model_distributions=eval_output.pred_probs,
+                human_distributions=eval_output.human_probs,
                 output_path=plot_path,
-                dataset_names=["Model", "Human"],
-                colors=["k", "tab:orange"],
-                markers=["D", "v"],
+                distribution_source=args.ternary_source,
                 title=title,
             )
             if ok:
@@ -312,6 +360,26 @@ def main() -> None:
                     "Ternary plotting skipped: install `python-ternary` "
                     "and matplotlib, or use --plots tvd."
                 )
+
+            if args.ternary_browser:
+                html_path = plot_dir / f"{Path(args.predictions).stem}_ternary_interactive.html"
+                ok_html = save_interactive_distribution_ternary_plot(
+                    model_distributions=eval_output.pred_probs,
+                    human_distributions=eval_output.human_probs,
+                    output_path=html_path,
+                    distribution_source=args.ternary_source,
+                    title=title,
+                    ids=ids,
+                    premises=premises,
+                    hypotheses=hypotheses,
+                )
+                if ok_html:
+                    print(f"Interactive ternary plot saved to {html_path}")
+                else:
+                    print(
+                        "Interactive ternary plotting skipped: install `plotly` "
+                        "or use --no-ternary_browser."
+                    )
 
 
 if __name__ == "__main__":

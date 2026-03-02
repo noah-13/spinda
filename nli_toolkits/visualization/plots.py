@@ -1,8 +1,14 @@
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 import numpy as np
 
+"""
+TVD plot from "Stop Measuring Calibration When Humans Disagree" (Baan et al., EMNLP 2022)
+- DistCE (Distribution Calibration Error) = TVD(model_probs, human_probs)
+"""
 
 def save_tvd_plot(
     tvd: np.ndarray,
@@ -48,10 +54,67 @@ def save_tvd_plot(
 
     return True
 
+
+save_distce_plot = save_tvd_plot
+
+
 """
 Ternary plots for visualizing distributional predictions and human distributions.
 From Beiduo's seeing the small through the big https://arxiv.org/abs/2406.17600
 """
+
+
+CB_COLOR_CYCLE = {
+    0: "#377eb8",
+    1: "#ff7f00",
+    2: "#4daf4a",
+    3: "#f781bf",
+    4: "#a65628",
+    5: "#984ea3",
+    6: "#999999",
+    7: "#e41a1c",
+    8: "#dede00",
+}
+
+
+
+def _style_ternary_axes(
+    tax: Any,
+    *,
+    scale: float,
+    labels: Sequence[str],
+    fontsize: float,
+    multiple: float,
+    multiple_grid: float,
+    tick_fontsize: float,
+    tick_offset: float,
+    label_offset: float,
+    weight: str,
+    boundary_linewidth: float = 2.0,
+    show_center_lines: bool = True,
+    show_gridlines: bool = True,
+    show_ticks: bool = True,
+    show_boundary: bool = True,
+) -> None:
+    if len(labels) != 3:
+        raise ValueError("labels must contain exactly 3 names.")
+    if show_center_lines:
+        midpoint = (scale / 3.0, scale / 3.0, scale / 3.0)
+        tax.line((scale / 2.0, scale / 2.0, 0), midpoint, color="black")
+        tax.line((0, scale / 2.0, scale / 2.0), midpoint, color="black")
+        tax.line((scale / 2.0, 0, scale / 2.0), midpoint, color="black")
+    tax.right_corner_label(labels[0], fontsize=fontsize, offset=label_offset, weight=weight)
+    tax.top_corner_label(labels[1], fontsize=fontsize, weight=weight)
+    tax.left_corner_label(labels[2], fontsize=fontsize, offset=label_offset, weight=weight)
+    if show_boundary:
+        tax.boundary(linewidth=boundary_linewidth)
+    if show_gridlines:
+        tax.gridlines(multiple=multiple_grid, color="grey")
+    if show_ticks:
+        tax.ticks(axis="lbr", linewidth=1, multiple=multiple, fontsize=tick_fontsize, offset=tick_offset)
+    tax.clear_matplotlib_ticks()
+    tax.get_axes().axis("off")
+
 
 def _normalize_to_ternary_scale(
     points: np.ndarray,
@@ -77,82 +140,299 @@ def _normalize_to_ternary_scale(
     return arr
 
 
-def _scale_center(points: np.ndarray, scale_factor: float) -> np.ndarray:
-    center = np.mean(points, axis=0)
-    return (points - center) * scale_factor + center
+def _normalize_distribution_rows(points: np.ndarray) -> np.ndarray:
+    arr = np.asarray(points, dtype=float)
+    if arr.ndim != 2 or arr.shape[1] != 3:
+        raise ValueError("Each distribution must have shape [N, 3].")
+    if arr.size == 0:
+        return arr
+    if not np.isfinite(arr).all():
+        raise ValueError("Distribution contains non-finite values.")
+    if (arr < 0).any():
+        raise ValueError("Distribution contains negative values.")
+
+    row_sums = arr.sum(axis=1, keepdims=True)
+    if (row_sums <= 0).any():
+        raise ValueError("Each row must sum to a positive value.")
+    return arr / row_sums
 
 
-def save_ternary_plot(
-    distributions: Sequence[np.ndarray | Sequence[Sequence[float]]],
+
+def save_distribution_ternary_plot(
+    *,
+    model_distributions: np.ndarray | Sequence[Sequence[float]],
+    human_distributions: np.ndarray | Sequence[Sequence[float]],
     output_path: Path,
-    dataset_names: Sequence[str] | None = None,
-    colors: Sequence[str] | None = None,
-    markers: Sequence[str] | None = None,
+    distribution_source: str = "both",
     title: str | None = None,
     scale: float = 100.0,
     grid_multiple: float = 10.0,
-    scale_up_index: int | None = None,
-    scale_factor: float = 1.0,
 ) -> bool:
     """
-    Save one ternary subplot per dataset.
+    Save ternary plot for model/human distributions.
 
-    Notes:
-    - Each distribution must be an [N, 3] matrix ordered as
-      [entailment, neutral, contradiction].
-    - Inputs can be probability rows summing to 1 or percentages summing to `scale`.
+    Args:
+        distribution_source:
+            - "model": plot only model prediction distribution
+            - "human": plot only human distribution
+            - "both":  plot both in two panels
     """
+    source = distribution_source.lower().strip()
+    if source not in {"model", "human", "both"}:
+        raise ValueError("distribution_source must be one of: model, human, both.")
+
     try:
         import matplotlib.pyplot as plt
         import ternary
     except ImportError:
         return False
 
-    if len(distributions) == 0:
-        return True
-
-    n_panels = len(distributions)
-    default_names = [f"Dataset {i + 1}" for i in range(n_panels)]
-    default_colors = ["k", "tab:orange", "tab:purple", "tab:blue", "tab:green"]
-    default_markers = ["D", "v", "<", "o", "s"]
-
-    names = list(dataset_names) if dataset_names is not None else default_names
-    if len(names) < n_panels:
-        names.extend(default_names[len(names):n_panels])
-
-    panel_colors = list(colors) if colors is not None else default_colors
-    if len(panel_colors) < n_panels:
-        panel_colors.extend(default_colors * (n_panels - len(panel_colors)))
-
-    panel_markers = list(markers) if markers is not None else default_markers
-    if len(panel_markers) < n_panels:
-        panel_markers.extend(default_markers * (n_panels - len(panel_markers)))
+    model_arr = _normalize_to_ternary_scale(np.asarray(model_distributions, dtype=float), scale=scale)
+    human_arr = _normalize_to_ternary_scale(np.asarray(human_distributions, dtype=float), scale=scale)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig, axes = plt.subplots(1, n_panels, figsize=(6 * n_panels, 6))
-    axes_arr = np.atleast_1d(axes)
 
-    for i, data in enumerate(distributions):
-        points = _normalize_to_ternary_scale(np.asarray(data, dtype=float), scale=scale)
-        if scale_up_index is not None and i == scale_up_index and scale_factor != 1.0:
-            points = _scale_center(points, scale_factor=scale_factor)
+    if source == "both":
+        fig, axes = plt.subplots(1, 2, figsize=(16, 6.5))
+        panel_specs = [
+            ("Model", model_arr, "tab:blue", axes[0]),
+            ("Human", human_arr, "tab:orange", axes[1]),
+        ]
+    elif source == "model":
+        fig, ax = plt.subplots(figsize=(6, 6))
+        panel_specs = [("Model", model_arr, "tab:blue", ax)]
+    else:
+        fig, ax = plt.subplots(figsize=(6, 6))
+        panel_specs = [("Human", human_arr, "tab:orange", ax)]
 
-        ax = axes_arr[i]
-        _, tax = ternary.figure(ax=ax, scale=scale)
-        tax.boundary(linewidth=2.0)
-        tax.gridlines(multiple=grid_multiple, color="grey")
-        tax.scatter(points, marker=panel_markers[i], color=panel_colors[i], label=names[i], vmin=None, vmax=None)
-        tax.ticks(axis="lbr", linewidth=1, multiple=grid_multiple)
-        tax.clear_matplotlib_ticks()
-        tax.get_axes().axis("off")
-        tax.left_axis_label("Entailment", fontsize=12, offset=0.14)
-        tax.right_axis_label("Neutral", fontsize=12, offset=0.14)
-        tax.bottom_axis_label("Contradiction", fontsize=12, offset=0.06)
-        tax.legend(fontsize=10)
+    for panel_name, panel_points, panel_color, panel_ax in panel_specs:
+        _, tax = ternary.figure(ax=panel_ax, scale=scale)
+        _style_ternary_axes(
+            tax,
+            scale=scale,
+            labels=("Entailment", "Neutral", "Contradiction"),
+            fontsize=11.0,
+            multiple=grid_multiple,
+            multiple_grid=grid_multiple,
+            tick_fontsize=9.0,
+            tick_offset=0.02,
+            label_offset=-0.08,
+            weight="normal",
+            show_center_lines=False,
+            show_gridlines=False,
+            show_ticks=False,
+            show_boundary=True,
+        )
+        tax.scatter(
+            panel_points,
+            marker="o",
+            color=panel_color,
+            s=12,
+            alpha=0.65,
+        )
+        panel_ax.text(
+            0.5,
+            -0.08,
+            panel_name,
+            transform=panel_ax.transAxes,
+            ha="center",
+            va="top",
+            fontsize=12,
+        )
 
     if title is not None:
         fig.suptitle(title)
     fig.tight_layout()
-    fig.savefig(output_path)
+    if source == "both":
+        fig.subplots_adjust(left=0.08, right=0.92, wspace=0.32, bottom=0.16)
+    else:
+        fig.subplots_adjust(left=0.10, right=0.90, bottom=0.16)
+    fig.savefig(output_path, bbox_inches="tight", pad_inches=0.2)
     plt.close(fig)
+    return True
+
+
+def save_interactive_distribution_ternary_plot(
+    *,
+    model_distributions: np.ndarray | Sequence[Sequence[float]],
+    human_distributions: np.ndarray | Sequence[Sequence[float]],
+    output_path: Path,
+    distribution_source: str = "both",
+    title: str | None = None,
+    ids: Sequence[str] | None = None,
+    premises: Sequence[str] | None = None,
+    hypotheses: Sequence[str] | None = None,
+) -> bool:
+    """
+    Save a browser-based ternary plot with hover metadata for each instance.
+    """
+    try:
+        import plotly.graph_objects as go
+        from plotly.subplots import make_subplots
+    except ImportError:
+        return False
+
+    source = distribution_source.lower().strip()
+    if source not in {"model", "human", "both"}:
+        raise ValueError("distribution_source must be one of: model, human, both.")
+
+    model_arr = _normalize_distribution_rows(np.asarray(model_distributions, dtype=float))
+    human_arr = _normalize_distribution_rows(np.asarray(human_distributions, dtype=float))
+    if model_arr.shape != human_arr.shape:
+        raise ValueError("model_distributions and human_distributions must have the same shape.")
+
+    n_rows = model_arr.shape[0]
+
+    def _build_meta(values: Sequence[str] | None, prefix: str) -> list[str]:
+        if values is None:
+            return [f"{prefix}_{i}" for i in range(n_rows)]
+        out = [str(v) for v in values]
+        if len(out) != n_rows:
+            raise ValueError(f"{prefix} length must match number of rows ({n_rows}).")
+        return out
+
+    ids_list = _build_meta(ids, "id")
+    premises_list = _build_meta(premises, "premise")
+    hypotheses_list = _build_meta(hypotheses, "hypothesis")
+
+    def _fmt_dist(row: np.ndarray) -> str:
+        return f"[{row[0]:.3f}, {row[1]:.3f}, {row[2]:.3f}]"
+
+    hpd = [f"H: {h} | P: {p}" for h, p in zip(hypotheses_list, premises_list)]
+    hjd = [_fmt_dist(row) for row in human_arr]
+    mjd = [_fmt_dist(row) for row in model_arr]
+
+    def _trace(
+        arr: np.ndarray,
+        *,
+        name: str,
+        color: str,
+        point_dist: list[str],
+        counterpart_dist: list[str],
+    ) -> go.Scatterternary:
+        customdata = np.column_stack([ids_list, hpd, point_dist, counterpart_dist, hjd, mjd])
+        counterpart_name = "MJD" if name == "Human" else "HJD"
+        return go.Scatterternary(
+            a=arr[:, 0],
+            b=arr[:, 1],
+            c=arr[:, 2],
+            mode="markers",
+            name=name,
+            marker=dict(size=7, color=color, opacity=0.72),
+            customdata=customdata,
+            hovertemplate=(
+                "id: %{customdata[0]}<br>"
+                "H-P: %{customdata[1]}<br>"
+                "This point: %{customdata[2]}<br>"
+                f"Matched {counterpart_name}: %{{customdata[3]}}<br>"
+            ),
+        )
+
+    if source == "both":
+        fig = make_subplots(
+            rows=1,
+            cols=2,
+            specs=[[{"type": "ternary"}, {"type": "ternary"}]],
+            horizontal_spacing=0.20,
+        )
+        fig.add_trace(
+            _trace(
+                model_arr,
+                name="Model",
+                color="royalblue",
+                point_dist=mjd,
+                counterpart_dist=hjd,
+            ),
+            row=1,
+            col=1,
+        )
+        fig.add_trace(
+            _trace(
+                human_arr,
+                name="Human",
+                color="darkorange",
+                point_dist=hjd,
+                counterpart_dist=mjd,
+            ),
+            row=1,
+            col=2,
+        )
+        fig.update_layout(
+            title=title,
+            template="plotly_white",
+            showlegend=False,
+            width=1500,
+            height=700,
+            margin=dict(l=80, r=80, t=90, b=110),
+            ternary=dict(
+                domain=dict(x=[0.03, 0.40], y=[0.14, 0.98]),
+                sum=1,
+                aaxis=dict(title=dict(text="Entailment", font=dict(size=13))),
+                baxis=dict(title=dict(text="Neutral", font=dict(size=13))),
+                caxis=dict(title=dict(text="Contradiction", font=dict(size=13))),
+            ),
+            ternary2=dict(
+                domain=dict(x=[0.60, 0.97], y=[0.14, 0.98]),
+                sum=1,
+                aaxis=dict(title=dict(text="Entailment", font=dict(size=13))),
+                baxis=dict(title=dict(text="Neutral", font=dict(size=13))),
+                caxis=dict(title=dict(text="Contradiction", font=dict(size=13))),
+            ),
+            annotations=[
+                dict(
+                    text="Model",
+                    x=0.215,
+                    y=0.03,
+                    xref="paper",
+                    yref="paper",
+                    showarrow=False,
+                    font=dict(size=16),
+                ),
+                dict(
+                    text="Human",
+                    x=0.785,
+                    y=0.03,
+                    xref="paper",
+                    yref="paper",
+                    showarrow=False,
+                    font=dict(size=16),
+                ),
+            ],
+        )
+    else:
+        fig = go.Figure()
+        if source == "model":
+            fig.add_trace(
+                _trace(
+                    model_arr,
+                    name="Model",
+                    color="royalblue",
+                    point_dist=mjd,
+                    counterpart_dist=hjd,
+                )
+            )
+        else:
+            fig.add_trace(
+                _trace(
+                    human_arr,
+                    name="Human",
+                    color="darkorange",
+                    point_dist=hjd,
+                    counterpart_dist=mjd,
+                )
+            )
+        fig.update_layout(
+            title=title,
+            template="plotly_white",
+            showlegend=False,
+            ternary=dict(
+                sum=1,
+                aaxis=dict(title="Entailment"),
+                baxis=dict(title="Neutral"),
+                caxis=dict(title="Contradiction"),
+            ),
+        )
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.write_html(output_path, include_plotlyjs="cdn", full_html=True)
     return True

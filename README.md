@@ -1,192 +1,216 @@
 # NLI Toolkits
 
-A toolkit for fine-tuning BERT/RoBERTa models on Natural Language Inference (NLI) tasks and evaluating calibration metrics, implementing methods from ["Stop Measuring Calibration When Humans Disagree"](https://aclanthology.org/2022.emnlp-main.124.pdf) (Baan et al., EMNLP 2022).
+A toolkit for Natural Language Inference (NLI) training and evaluation, with support for:
+- Hard-label training on SNLI
+- Soft-label (human distribution) training on ChaosNLI
+- Unified prediction export (JSONL)
+- Evaluation on both single-label and distributional ground truth
+- TVD and ternary visualizations (including interactive HTML)
 
-## Features
+## 1. Feature Overview
 
-- **Data Loading**: Support for SNLI and ChaosNLI datasets
-- **Model Training**: Fine-tune BERT/RoBERTa on SNLI
-- **Evaluation Metrics**: 
-  - ECE (Expected Calibration Error)
-  - EntCE (Human Entropy Calibration Error)
-  - RankCS (Human Ranking Calibration Score)
-  - DistCE (Human Distribution Calibration Error)
+- Data loading
+  - `SNLIReader`: loads `train/dev/test` from HuggingFace `snli`
+  - `ChaosNLIReader`: loads ChaosNLI JSONL with multiple supported schemas (`label_count` / `label_dist` / `label_counter`)
+- Model training
+  - Backbones: `roberta-base` / `bert-base-uncased`
+  - Multi-seed training support
+  - Soft-label training (`cross_entropy` or `kl_div`)
+  - Optional Weights & Biases logging
+- Prediction
+  - Standard JSONL output with `id/task/split/source/outputs`
+  - `outputs` includes at least `probs` (3-way probabilities) and `pred` (label id)
+- Evaluation
+  - Single-label (SNLI): `accuracy`
+  - Distributional (ChaosNLI):
+    - `accuracy`
+    - `tvd_mean`
+    - `jsd_mean`
+    - `kl_mean` (KL(human || pred))
+    - `soft_micro_f1`
+    - `soft_macro_f1`
+    - `distance_correlation`
+- Visualization
+  - TVD distribution plot (PNG)
+  - Ternary distribution plot (PNG)
+  - Interactive ternary plot (HTML with hover metadata)
 
-## Installation
+## 2. Installation
+
+Python 3.12+ is recommended.
 
 ```bash
-# Install dependencies
+# With uv (recommended)
+uv sync
+
+# Or with pip
 pip install -e .
 ```
 
-Optional (enable plotting in `evaluate.py`):
+## 3. Quick Start
+
+### 3.1 Train (SNLI, hard labels)
 
 ```bash
-pip install -e ".[plot]"
+python -m nli_toolkits.scripts.train \
+  --data_source snli \
+  --model roberta-base \
+  --output_dir ./outputs/hard_snli \
+  --num_epochs 3 \
+  --train_batch_size 32 \
+  --eval_batch_size 64 \
+  --seeds 42
 ```
 
-## Quick Start
+Default model output location:
+- `./outputs/hard_snli/seed_42/final_model`
 
-### 1. Train a Model
-
-Train RoBERTa on SNLI:
+### 3.2 Predict
 
 ```bash
-python main.py train \
-    --model roberta-base \
-    --output_dir ./outputs/roberta_snli \
-    --num_epochs 3 \
-    --batch_size 16 \
-    --learning_rate 2e-5
+python -m nli_toolkits.scripts.predict \
+  --model_path ./outputs/hard_snli/seed_42/final_model \
+  --data_source snli \
+  --split test \
+  --output_file outputs/predictions/snli_preds.jsonl \
+  --batch_size 32
 ```
 
-Or use BERT:
+### 3.3 Evaluate (SNLI)
 
 ```bash
-python main.py train \
-    --model bert-base-uncased \
-    --output_dir ./outputs/bert_snli \
-    --num_epochs 3
+python -m nli_toolkits.scripts.evaluate \
+  --predictions outputs/predictions/snli_preds.jsonl \
+  --ground_truth_source snli \
+  --ground_truth_split test \
+  --output_file outputs/results/snli_eval.json
 ```
 
-### 2. Generate Predictions
+## 4. ChaosNLI Workflow (Soft Labels)
 
-Generate predictions on test set:
+### 4.1 Split train/dev (optional)
 
 ```bash
-python main.py predict \
-    --model_path ./outputs/roberta_snli/final_model \
-    --split test \
-    --output_file predictions.jsonl \
-    --batch_size 32
+python -m nli_toolkits.scripts.split_chaosnli \
+  --input chaosNLI_v1.0/chaosNLI_snli.jsonl \
+  --train-size 1400 \
+  --seed 42 \
+  --train-output chaosNLI_v1.0/chaosNLI_snli_train.jsonl \
+  --dev-output chaosNLI_v1.0/chaosNLI_snli_dev.jsonl
 ```
 
-### 3. Evaluate Predictions
-
-Evaluate on SNLI test set (single-label evaluation):
+### 4.2 Soft-label training (ChaosNLI)
 
 ```bash
-python main.py evaluate \
-    --predictions predictions.jsonl \
-    --ground_truth_source snli \
-    --ground_truth_split test \
-    --output_file results.json
+python -m nli_toolkits.scripts.train \
+  --data_source chaosnli \
+  --chaosnli_train_path chaosNLI_v1.0/chaosNLI_snli_train.jsonl \
+  --chaosnli_dev_path chaosNLI_v1.0/chaosNLI_snli_dev.jsonl \
+  --use_soft_labels \
+  --soft_label_loss cross_entropy \
+  --soft_label_metric_for_best_model tvd \
+  --model roberta-base \
+  --output_dir ./outputs/soft_chaosnli \
+  --num_epochs 20 \
+  --seeds 42
 ```
 
-Evaluate on ChaosNLI (distribution-based evaluation):
+### 4.3 Predict on ChaosNLI
 
 ```bash
-# First, download ChaosNLI from:
-# https://www.dropbox.com/s/h4j7dqszmpt2679/chaosNLI_v1.0.zip
-
-python main.py evaluate \
-    --predictions predictions.jsonl \
-    --ground_truth_source chaosnli \
-    --chaosnli_path chaosNLI_v1.0/chaosNLI_snli.jsonl \
-    --output_file chaosnli_results.json
-
-# By default, evaluation also saves a DistCE distribution plot to outputs/figures/.
-# You can also save ternary plots (model vs human distributions) with:
-python main.py evaluate \
-    --predictions predictions.jsonl \
-    --ground_truth_source chaosnli \
-    --chaosnli_path ./data/chaosNLI_v1.0/chaosNLI_snli.jsonl \
-    --output_file chaosnli_results.json \
-    --plots distce ternary
-#
-# Disable plotting with:
-python main.py evaluate \
-    --predictions predictions.jsonl \
-    --ground_truth_source chaosnli \
-    --chaosnli_path ./data/chaosNLI_v1.0/chaosNLI_snli.jsonl \
-    --output_file chaosnli_results.json \
-    --no-plot
+python -m nli_toolkits.scripts.predict \
+  --model_path ./outputs/soft_chaosnli/seed_42/final_model \
+  --data_source chaosnli \
+  --chaosnli_path chaosNLI_v1.0/chaosNLI_snli.jsonl \
+  --split test \
+  --output_file outputs/predictions/chaos_preds.jsonl
 ```
 
-## Project Structure
+### 4.4 Evaluate + visualize on ChaosNLI
 
+```bash
+python -m nli_toolkits.scripts.evaluate \
+  --predictions outputs/predictions/chaos_preds.jsonl \
+  --ground_truth_source chaosnli \
+  --chaosnli_path chaosNLI_v1.0/chaosNLI_snli.jsonl \
+  --output_file outputs/results/chaos_eval.json \
+  --plots tvd ternary \
+  --plot_dir outputs/figures \
+  --ternary_source both
 ```
+
+Useful optional flags:
+- `--no-plot`: disable plotting
+- `--no-ternary_browser`: disable interactive HTML ternary output
+- `--predictions_format machamp`: parse predictions in machamp/ChaosNLI-style TSV format
+
+## 5. Unified CLI Entry (main.py)
+
+You can also use the unified entrypoint:
+
+```bash
+python main.py train ...
+python main.py predict ...
+python main.py evaluate ...
+```
+
+## 6. Data Inspection
+
+```bash
+python -m nli_toolkits.scripts.inspect_data \
+  --source snli \
+  --split test \
+  --num_examples 5
+```
+
+Or for ChaosNLI:
+
+```bash
+python -m nli_toolkits.scripts.inspect_data \
+  --source chaosnli \
+  --split test \
+  --chaosnli_path chaosNLI_v1.0/chaosNLI_snli.jsonl \
+  --num_examples 10
+```
+
+## 7. Prediction File Format (JSONL)
+
+One-line example:
+
+```json
+{"id":"341#1","task":"nli","split":"test","source":"snli","outputs":{"probs":[0.7,0.2,0.1],"pred":0}}
+```
+
+Notes:
+- `id` must align with ground-truth sample IDs for evaluation
+- `outputs.probs` must be a 3-way probability vector
+- `outputs.pred` is label id (`0`: entailment, `1`: neutral, `2`: contradiction)
+
+## 8. Project Structure
+
+```text
 nli_toolkits/
-├── data/              # Data loading modules
-│   ├── schemas.py     # Data schemas (NLISample, etc.)
-│   └── readers/       # Dataset readers (SNLI, ChaosNLI)
-├── models/            # Model training
-│   └── trainer.py     # NLITrainer class
-├── eval/              # Evaluation metrics
-│   ├── metrics.py     # Metric implementations
-│   └── evaluator.py   # Evaluator class
-└── scripts/           # CLI scripts
-    ├── train.py       # Training script
-    ├── predict.py     # Prediction script
-    └── evaluate.py    # Evaluation script
+├── data/
+│   ├── schemas.py
+│   └── readers/
+│       ├── snli_reader.py
+│       └── chaosnli_reader.py
+├── models/
+│   └── trainer.py
+├── eval/
+│   ├── evaluator.py
+│   └── metrics.py
+├── visualization/
+│   └── plots.py
+└── scripts/
+    ├── train.py
+    ├── predict.py
+    ├── evaluate.py
+    ├── inspect_data.py
+    └── split_chaosnli.py
 ```
 
-## Usage Examples
+## 9. References
 
-### Programmatic Usage
-
-```python
-from nli_toolkits.data import SNLIReader
-from nli_toolkits.models import NLITrainer, TrainingConfig
-from nli_toolkits.eval import Evaluator
-
-# Load data
-reader = SNLIReader()
-train_samples = reader.load_train()
-eval_samples = reader.load_dev()
-
-# Train model
-config = TrainingConfig(
-    model_name_or_path="roberta-base",
-    num_epochs=3,
-    batch_size=16,
-)
-trainer = NLITrainer(config)
-trainer.train(train_samples, eval_samples)
-
-# Evaluate
-evaluator = Evaluator()
-results = evaluator.evaluate(predictions, ground_truth)
-print(results)
-```
-
-## Evaluation Metrics
-
-### ECE (Expected Calibration Error)
-Measures calibration against majority vote labels. Lower is better.
-
-### EntCE (Human Entropy Calibration Error)
-Measures alignment between model uncertainty and human disagreement. 
-- Positive values: model is over-confident
-- Negative values: model is under-confident
-
-### RankCS (Human Ranking Calibration Score)
-Measures whether model's class ranking matches human ranking. Higher is better (range: 0-1).
-
-### DistCE (Human Distribution Calibration Error)
-Measures total variation distance between model predictions and human distributions. Lower is better.
-
-## Requirements
-
-- Python >= 3.12
-- PyTorch >= 2.10.0
-- Transformers >= 4.57.6
-- Datasets >= 4.5.0
-- NumPy
-
-## Citation
-
-If you use this code, please cite the original paper:
-
-```bibtex
-@inproceedings{baan2022stop,
-  title={Stop Measuring Calibration When Humans Disagree},
-  author={Baan, Joris and Aziz, Wilker and Plank, Barbara and Fern{\'a}ndez, Raquel},
-  booktitle={Proceedings of EMNLP},
-  year={2022}
-}
-```
-
-## License
-
-[Add your license here]
+- Baan et al., 2022, *Stop Measuring Calibration When Humans Disagree* (EMNLP)
+- Pang et al., 2024, *Seeing the Small Through the Big* (global-structure metrics/visualization inspiration)
