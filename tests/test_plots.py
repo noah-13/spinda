@@ -4,7 +4,7 @@ import pytest
 
 matplotlib.use("Agg")
 
-from nli_toolkits.visualization import (
+from hlv_toolkits.visualization import (
     get_boundaries,
     plot_bootstrap_bounds,
     plot_ternary_axes,

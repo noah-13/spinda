@@ -1,6 +1,5 @@
-import torch
+def decode_utf8_bytes_to_str_wrong(bytesring: bytes):
+    return "".join([bytes([b]).decode('utf-8') for b in bytesring])
 
-positions = torch.randn(10, 3)
-x = positions.expand(10, -1, -1)
-print(x.shape)
-                         
+s = "hello!".encode('utf-8')
+print(decode_utf8_bytes_to_str_wrong(s))  # This will raise an error

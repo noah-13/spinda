@@ -1,4 +1,4 @@
-from nli_toolkits.data.schemas import (
+from hlv_toolkits.data.schemas import (
     NLISample, NLIDistributionSample,
     NLI_LABELS, NLI_LABEL2ID, NLI_ID2LABEL, NLI_NUM_LABELS,
     PredictionRecord,

@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from nli_toolkits.data import ChaosNLIReader, SNLIReader
-from nli_toolkits.data.schemas import NLIDistributionSample, NLISample
+from hlv_toolkits.data import ChaosNLIReader, SNLIReader
+from hlv_toolkits.data.schemas import NLIDistributionSample, NLISample
 
 
 def test_snli_reader_loads():
@@ -19,7 +19,7 @@ def test_snli_reader_loads():
 
 def test_snli_reader_load_split_monkeypatched(monkeypatch: pytest.MonkeyPatch):
     # Avoid any network/cache dependency from HuggingFace datasets.
-    import nli_toolkits.data.readers.snli_reader as snli_reader_module
+    import hlv_toolkits.data.readers.snli_reader as snli_reader_module
 
     calls = {"n": 0}
 
@@ -71,7 +71,7 @@ def test_snli_reader_unknown_split_raises():
 
 
 def test_chaosnli_reader_defaults_to_repo_file_if_present():
-    repo_file = Path("chaosNLI_v1.0/chaosNLI_snli.jsonl")
+    repo_file = Path("data/external/chaosnli/chaosNLI_snli.jsonl")
     reader = ChaosNLIReader(data_path=None, source="chaosnli-snli")
     if repo_file.exists():
         samples = reader.load_dev()
@@ -140,7 +140,7 @@ def test_chaosnli_reader_parses_supported_formats(tmp_path: Path):
 
 
 def test_chaosnli_reader_loads_repo_jsonl_if_present():
-    repo_file = Path("chaosNLI_v1.0/chaosNLI_snli.jsonl")
+    repo_file = Path("data/external/chaosnli/chaosNLI_snli.jsonl")
     if not repo_file.exists():
         pytest.skip("Repo ChaosNLI file not available in this checkout.")
 
@@ -154,7 +154,7 @@ def test_chaosnli_reader_loads_repo_jsonl_if_present():
 
 
 def test_chaosnli_reader_alpha_nli_is_rejected_if_present():
-    repo_file = Path("chaosNLI_v1.0/chaosNLI_alphanli.jsonl")
+    repo_file = Path("data/external/chaosnli/chaosNLI_alphanli.jsonl")
     if not repo_file.exists():
         pytest.skip("Repo ChaosNLI alphaNLI file not available in this checkout.")
 
@@ -164,7 +164,7 @@ def test_chaosnli_reader_alpha_nli_is_rejected_if_present():
 
 
 def test_chaosnli_reader_loads_mnli_if_present():
-    repo_file = Path("chaosNLI_v1.0/chaosNLI_mnli_m.jsonl")
+    repo_file = Path("data/external/chaosnli/chaosNLI_mnli_m.jsonl")
     if not repo_file.exists():
         pytest.skip("Repo ChaosNLI MNLI file not available in this checkout.")
 
@@ -174,3 +174,62 @@ def test_chaosnli_reader_loads_mnli_if_present():
     assert samples[0].premise
     assert samples[0].hypothesis
     assert len(samples[0].human_dist) == 3
+
+
+def test_discogem_reader_2_0_soft_and_hard(tmp_path: Path):
+    p = tmp_path / "discogem20.tsv"
+    p.write_text(
+        "\t".join([
+            "split",
+            "itemid",
+            "arg1_context_en",
+            "arg2_context_en",
+            "WAWA_en",
+            "WAWA_dist_en",
+        ])
+        + "\n"
+        + "\t".join([
+            "train",
+            "id1",
+            "A1",
+            "A2",
+            "cause",
+            "{'cause': 0.7, 'contrast': 0.3}",
+        ])
+        + "\n",
+        encoding="utf-8",
+    )
+
+    from hlv_toolkits.data import DiscoGeMReader
+
+    soft_reader = DiscoGeMReader(data_path=str(p), version="2.0", label_mode="soft")
+    soft = soft_reader.load_train()
+    assert len(soft) == 1
+    assert soft[0].task == "discogem"
+    assert soft[0].premise == "A1"
+    assert soft[0].hypothesis == "A2"
+    assert abs(sum(soft[0].human_dist) - 1.0) < 1e-6
+
+    hard_reader = DiscoGeMReader(data_path=str(p), version="2.0", label_mode="hard")
+    hard = hard_reader.load_train()
+    assert len(hard) == 1
+    assert hard[0].human_dist == []
+    assert hard[0].label >= 0
+
+
+def test_discogem_reader_auto_version_detects_2_0(tmp_path: Path):
+    p = tmp_path / "discogem_auto.tsv"
+    p.write_text(
+        "split\titemid\targ1_context_en\targ2_context_en\tWAWA_en\tWAWA_dist_en\n"
+        "train\ta1\tP\tH\tcause\t{'cause': 1.0}\n",
+        encoding="utf-8",
+    )
+
+    from hlv_toolkits.data import DiscoGeMReader
+
+    reader = DiscoGeMReader(data_path=str(p), version="auto", label_mode="soft")
+    samples = reader.load_train()
+    assert len(samples) == 1
+    assert samples[0].id == "a1"
+    assert samples[0].premise == "P"
+    assert samples[0].hypothesis == "H"

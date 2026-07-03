@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-Main entry point for NLI toolkits.
+Main entry point for HLV Toolkits.
 
-Provides unified CLI interface for training, prediction, and evaluation.
+Provides a unified CLI interface for training, prediction, evaluation, and preprocessing.
 """
 
 import sys
 from pathlib import Path
 
-# Add parent directory to path to allow imports
+# Add the repository root to the import path when running as a script
 sys.path.insert(0, str(Path(__file__).parent))
 
-from nli_toolkits.scripts import evaluate, predict, train
+from hlv_toolkits.scripts import evaluate, predict, preprocess, train
 
 
 def main() -> None:
@@ -19,9 +19,10 @@ def main() -> None:
     if len(sys.argv) < 2:
         print("Usage: python main.py <command> [options]")
         print("\nCommands:")
-        print("  train      - Train a model on SNLI")
+        print("  train      - Train a model")
         print("  predict    - Generate predictions with a trained model")
         print("  evaluate   - Evaluate predictions against ground truth")
+        print("  preprocess - Normalize raw datasets into canonical JSONL")
         print("\nFor help on a specific command, run:")
         print("  python main.py <command> --help")
         sys.exit(1)
@@ -37,9 +38,11 @@ def main() -> None:
         predict.main()
     elif command == "evaluate":
         evaluate.main()
+    elif command == "preprocess":
+        preprocess.main()
     else:
         print(f"Unknown command: {command}")
-        print("Available commands: train, predict, evaluate")
+        print("Available commands: train, predict, evaluate, preprocess")
         sys.exit(1)
 
 
