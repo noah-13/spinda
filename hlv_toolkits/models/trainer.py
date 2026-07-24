@@ -97,6 +97,57 @@ MULTILEVEL_TOTAL_LABELS = _offset
 LABEL_INPUT_PREFIXES = ("labels", "hard_labels", "soft_labels")
 
 
+def _print_dev_metric_plot(trainer: Trainer, metric_name: str) -> None:
+    """Print a small dependency-free terminal plot of the dev metric."""
+    metric_key = f"eval_{metric_name}"
+    points = [
+        (float(row["epoch"]), float(row[metric_key]))
+        for row in trainer.state.log_history
+        if row.get("epoch") is not None and row.get(metric_key) is not None
+    ]
+    if not points:
+        print(f"No dev values found for {metric_key}; skipping plot.")
+        return
+
+    width, height = 60, 18
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    y_min, y_max = min(ys), max(ys)
+    if y_max == y_min:
+        y_min -= 0.5
+        y_max += 0.5
+    else:
+        margin = (y_max - y_min) * 0.08
+        y_min -= margin
+        y_max += margin
+
+    def project(epoch: float, value: float) -> tuple[int, int]:
+        x = 0 if xs[-1] == xs[0] else round((epoch - xs[0]) / (xs[-1] - xs[0]) * (width - 1))
+        y = round((y_max - value) / (y_max - y_min) * (height - 1))
+        return max(0, min(width - 1, x)), max(0, min(height - 1, y))
+
+    canvas = [[" " for _ in range(width)] for _ in range(height)]
+    previous = None
+    for epoch, value in points:
+        x, y = project(epoch, value)
+        if previous is not None:
+            px, py = previous
+            step = 1 if x >= px else -1
+            for ix in range(px, x + step, step):
+                iy = round(py + (y - py) * ((ix - px) / (x - px))) if x != px else y
+                canvas[max(0, min(height - 1, iy))][ix] = "▌"
+        canvas[y][x] = "█"
+        previous = (x, y)
+
+    print(f"\nDev scores ({metric_name}) over epochs (x)")
+    print("┌" + "─" * width + "┐")
+    for row_idx, row in enumerate(canvas):
+        label = f" {y_max:.3g}" if row_idx == 0 else (f" {y_min:.3g}" if row_idx == height - 1 else "")
+        print("│" + "".join(row) + "│" + label)
+    print("└" + "─" * width + "┘")
+    print(f"epoch {xs[0]:g}" + " " * max(1, width - 16) + f"{xs[-1]:g}")
+
+
 def _strip_label_inputs(kwargs):
     return {
         key: value
@@ -125,13 +176,12 @@ class TrainingConfig:
     gradient_accumulation_steps: int = 1
 
     # Head and objective settings
-    head_type: str = "classification"  # choices: classification, joint_classification, per_label_regression, multilevel_classification, multilevel_regression
+    head_type: str = "classification"  # choices: classification, joint_classification, multilevel_classification, multilevel_regression
 
     # Soft-label training settings
     use_soft_labels: bool = False
     soft_label_loss: str = "cross_entropy"  # choices: cross_entropy, kl_div
     soft_label_metric_for_best_model: str = "tvd"  # choices: kl_divergence, tvd, accuracy
-    regression_loss: str = "mse"  # choices: mse, bce
     joint_loss_lambda: float = 0.5
     multilevel_label_sizes: Optional[Tuple[int, int, int]] = None
 
@@ -147,7 +197,8 @@ class TrainingConfig:
     # Other settings
     seed: int = 42
     fp16: bool = False
-    dataloader_num_workers: int = 4
+    device: str = "auto"
+    dataloader_num_workers: int = 2
 
     # Wandb settings
     use_wandb: bool = False
@@ -161,19 +212,16 @@ class TrainingConfig:
         valid_head_types = {
             "classification",
             "joint_classification",
-            "per_label_regression",
             "multilevel_classification",
             "multilevel_regression",
         }
         if self.head_type not in valid_head_types:
             raise ValueError(
                 "head_type must be one of: classification, joint_classification, "
-                "per_label_regression, multilevel_classification, multilevel_regression"
+                "multilevel_classification, multilevel_regression"
             )
-        if self.soft_label_loss not in {"cross_entropy", "kl_div"}:
-            raise ValueError("soft_label_loss must be one of: cross_entropy, kl_div")
-        if self.regression_loss not in {"mse", "bce"}:
-            raise ValueError("regression_loss must be one of: mse, bce")
+        if self.soft_label_loss not in {"cross_entropy", "kl_div", "mse"}:
+            raise ValueError("soft_label_loss must be one of: cross_entropy, kl_div, mse")
         if not 0.0 <= self.joint_loss_lambda <= 1.0:
             raise ValueError("joint_loss_lambda must be in [0, 1]")
 
@@ -201,7 +249,7 @@ class TrainingConfig:
 
         metric_for_best_model = "accuracy"
         greater_is_better = True
-        if self.use_soft_labels or self.head_type in {"joint_classification", "per_label_regression"}:
+        if self.use_soft_labels or self.head_type == "joint_classification":
             metric_for_best_model = self.soft_label_metric_for_best_model
             greater_is_better = metric_for_best_model == "accuracy"
 
@@ -226,7 +274,9 @@ class TrainingConfig:
             save_total_limit=self.save_total_limit,
             seed=self.seed,
             fp16=self.fp16,
+            use_cpu=self.device == "cpu",
             dataloader_num_workers=self.dataloader_num_workers,
+            dataloader_pin_memory=self.device != "cpu",
             load_best_model_at_end=True,
             metric_for_best_model=metric_for_best_model,
             greater_is_better=greater_is_better,
@@ -404,55 +454,6 @@ class ThroughputLoggingCallback(TrainerCallback):
         self.last_epoch_step = current_step
 
 
-class PerLabelRegressionModel(nn.Module):
-    """Backbone + independent scalar heads (one per label)."""
-
-    META_FILENAME = "per_label_regression_meta.json"
-
-    def __init__(self, backbone: nn.Module, hidden_size: int, num_labels: int) -> None:
-        super().__init__()
-        self.backbone = backbone
-        self.dropout = nn.Dropout(0.1)
-        self.regression_heads = nn.ModuleList([nn.Linear(hidden_size, 1) for _ in range(num_labels)])
-        self.num_labels = num_labels
-
-    @classmethod
-    def from_pretrained(cls, model_name_or_path: str, num_labels: int) -> "PerLabelRegressionModel":
-        config = AutoConfig.from_pretrained(model_name_or_path)
-        backbone = AutoModel.from_pretrained(model_name_or_path, config=config)
-        hidden_size = int(config.hidden_size)
-        model = cls(backbone=backbone, hidden_size=hidden_size, num_labels=num_labels)
-
-        meta_path = Path(model_name_or_path) / cls.META_FILENAME
-        if meta_path.exists():
-            state_path = Path(model_name_or_path) / "per_label_regression_heads.pt"
-            if state_path.exists():
-                model.load_state_dict(torch.load(state_path, map_location="cpu"))
-        return model
-
-    def save_pretrained(self, save_dir: Union[str, Path]) -> None:
-        save_path = Path(save_dir)
-        save_path.mkdir(parents=True, exist_ok=True)
-        self.backbone.save_pretrained(save_path)
-        torch.save(self.state_dict(), save_path / "per_label_regression_heads.pt")
-        with open(save_path / self.META_FILENAME, "w", encoding="utf-8") as f:
-            json.dump({"head_type": "per_label_regression", "num_labels": self.num_labels}, f)
-
-    def forward(self, input_ids=None, attention_mask=None, token_type_ids=None, **kwargs):
-        backbone_kwargs = {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            **_strip_label_inputs(kwargs),
-        }
-        if token_type_ids is not None and "token_type_ids" in inspect.signature(self.backbone.forward).parameters:
-            backbone_kwargs["token_type_ids"] = token_type_ids
-        outputs = self.backbone(**backbone_kwargs)
-        pooled = outputs.pooler_output if getattr(outputs, "pooler_output", None) is not None else outputs.last_hidden_state[:, 0]
-        pooled = self.dropout(pooled)
-        logits = torch.cat([head(pooled) for head in self.regression_heads], dim=-1)
-        return SequenceClassifierOutput(logits=logits)
-
-
 class JointClassificationModel(nn.Module):
     """Backbone + separate hard and soft classification heads."""
 
@@ -524,7 +525,6 @@ class SoftLabelTrainer(Trainer):
         use_soft_labels: bool = False,
         soft_label_loss: str = "cross_entropy",
         head_type: str = "classification",
-        regression_loss: str = "mse",
         joint_loss_lambda: float = 0.5,
         **kwargs,
     ):
@@ -532,12 +532,15 @@ class SoftLabelTrainer(Trainer):
         self.use_soft_labels = use_soft_labels
         self.soft_label_loss = soft_label_loss
         self.head_type = head_type
-        self.regression_loss = regression_loss
         self.joint_loss_lambda = joint_loss_lambda
 
     def _compute_soft_loss(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
         labels = labels.to(logits.dtype)
         labels = labels / labels.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+        if self.soft_label_loss == "mse":
+            predictions = F.softmax(logits, dim=-1)
+            return F.mse_loss(predictions, labels)
+
         log_probs = F.log_softmax(logits, dim=-1)
         if self.soft_label_loss == "kl_div":
             return F.kl_div(log_probs, labels, reduction="batchmean")
@@ -592,24 +595,8 @@ class SoftLabelTrainer(Trainer):
                     level_labels = level_labels / level_labels.sum(dim=-1, keepdim=True).clamp(min=1e-8)
                 else:
                     level_labels = F.one_hot(level_labels.long(), num_classes=end - start).to(pred.dtype)
-                if self.regression_loss == "bce":
-                    losses.append(F.binary_cross_entropy(pred, level_labels))
-                else:
-                    losses.append(F.mse_loss(pred, level_labels))
+                losses.append(F.mse_loss(pred, level_labels))
             loss = sum(losses)
-        elif self.head_type == "per_label_regression":
-            labels = inputs["labels"]
-            if labels.dim() == 1:
-                labels = F.one_hot(labels.long(), num_classes=logits.size(-1)).to(logits.dtype)
-            else:
-                labels = labels.to(logits.dtype)
-                labels = labels / labels.sum(dim=-1, keepdim=True).clamp(min=1e-8)
-
-            pred = torch.sigmoid(logits)
-            if self.regression_loss == "bce":
-                loss = F.binary_cross_entropy(pred, labels)
-            else:
-                loss = F.mse_loss(pred, labels)
         else:
             labels = inputs["labels"]
             if self.use_soft_labels:
@@ -631,9 +618,7 @@ class NLITrainer:
         print(f"Loading tokenizer and model: {model_name}")
         self.tokenizer = load_tokenizer_with_fallback(model_name)
 
-        if self.config.head_type == "per_label_regression":
-            self.model = PerLabelRegressionModel.from_pretrained(model_name, num_labels=self.config.num_labels)
-        elif self.config.head_type == "joint_classification":
+        if self.config.head_type == "joint_classification":
             self.model = JointClassificationModel.from_pretrained(model_name, num_labels=self.config.num_labels)
         elif self.config.head_type == "multilevel_classification":
             level_sizes = self.config.multilevel_label_sizes or tuple(
@@ -717,17 +702,6 @@ class NLITrainer:
             return label_columns
 
         def extract_labels(samples: List[Union[NLISample, NLIDistributionSample]]) -> List[Union[int, List[float]]]:
-            if self.config.head_type == "per_label_regression":
-                if self.config.use_soft_labels:
-                    return extract_soft_labels(samples)
-
-                one_hot: List[List[float]] = []
-                for s in samples:
-                    vec = [0.0] * self.config.num_labels
-                    vec[int(s.label)] = 1.0
-                    one_hot.append(vec)
-                return one_hot
-
             if not self.config.use_soft_labels:
                 return [s.label for s in samples]
 
@@ -851,15 +825,11 @@ class NLITrainer:
                 level_probs, level_labels = _prepare_multilevel_predictions(predictions, labels)
                 return _metrics_from_level_probs(level_probs, level_labels)
 
-            if self.config.head_type == "per_label_regression":
-                pred_scores = torch.sigmoid(torch.tensor(predictions))
-                pred_probs = (pred_scores / pred_scores.sum(dim=-1, keepdim=True).clamp(min=1e-8)).cpu().numpy()
-            else:
-                pred_probs = torch.softmax(torch.tensor(predictions), dim=-1).cpu().numpy()
+            pred_probs = torch.softmax(torch.tensor(predictions), dim=-1).cpu().numpy()
 
             pred_labels = pred_probs.argmax(axis=-1)
 
-            if self.config.use_soft_labels or self.config.head_type == "per_label_regression":
+            if self.config.use_soft_labels:
                 labels = np.asarray(labels, dtype=np.float32)
                 labels = labels / np.clip(labels.sum(axis=-1, keepdims=True), a_min=1e-8, a_max=None)
                 true_labels = labels.argmax(axis=-1)
@@ -880,7 +850,7 @@ class NLITrainer:
             args=training_args,
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
-            tokenizer=self.tokenizer,
+            processing_class=self.tokenizer,
             data_collator=DataCollatorWithPadding(tokenizer=self.tokenizer),
             compute_metrics=compute_metrics,
             callbacks=[
@@ -892,12 +862,12 @@ class NLITrainer:
             use_soft_labels=self.config.use_soft_labels,
             soft_label_loss=self.config.soft_label_loss,
             head_type=self.config.head_type,
-            regression_loss=self.config.regression_loss,
             joint_loss_lambda=self.config.joint_loss_lambda,
         )
 
         print("Starting training...")
         trainer.train()
+        _print_dev_metric_plot(trainer, self.config.soft_label_metric_for_best_model)
 
         output_path = Path(self.config.output_dir) / "final_model"
         output_path.mkdir(parents=True, exist_ok=True)
@@ -922,7 +892,6 @@ class NLITrainer:
         multilevel_class_meta = model_dir / MultiLevelClassificationModel.META_FILENAME
         multilevel_reg_meta = model_dir / MultiLevelRegressionModel.META_FILENAME
         joint_meta_path = model_dir / JointClassificationModel.META_FILENAME
-        per_label_meta_path = model_dir / PerLabelRegressionModel.META_FILENAME
         if multilevel_class_meta.exists():
             with open(multilevel_class_meta, "r", encoding="utf-8") as f:
                 meta = json.load(f)
@@ -947,13 +916,6 @@ class NLITrainer:
             with open(joint_meta_path, "r", encoding="utf-8") as f:
                 meta = json.load(f)
             self.model = JointClassificationModel.from_pretrained(
-                str(model_dir),
-                num_labels=int(meta.get("num_labels", NLI_NUM_LABELS)),
-            )
-        elif per_label_meta_path.exists():
-            with open(per_label_meta_path, "r", encoding="utf-8") as f:
-                meta = json.load(f)
-            self.model = PerLabelRegressionModel.from_pretrained(
                 str(model_dir),
                 num_labels=int(meta.get("num_labels", NLI_NUM_LABELS)),
             )

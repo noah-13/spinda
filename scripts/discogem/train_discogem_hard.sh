@@ -1,17 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR/../.."
+
+
 MODEL="${MODEL:-roberta-base}"
-OUTPUT_DIR="${OUTPUT_DIR:-./outputs/discogem/hard}"
-PROCESSED_DATA_FILE="${PROCESSED_DATA_FILE:-data/processed/discogem.jsonl}"
+DEVICE="${DEVICE:-auto}"
 SEEDS="${SEEDS:-42}"
+DISCOGEM_LABEL_LEVEL="${DISCOGEM_LABEL_LEVEL:-level2}"
+SAFE_MODEL="${MODEL//\//_}"
+OUTPUT_DIR="${OUTPUT_DIR:-outputs/discogem/runs/single/${DISCOGEM_LABEL_LEVEL}/${SAFE_MODEL}__classification__hard}"
 
 uv run python -m hlv_toolkits.scripts.train \
+  --device "$DEVICE" \
   --data_source processed \
   --processed_task discogem \
-  --processed_data_dir "$PROCESSED_DATA_FILE" \
+  --discogem_label_mode hard \
   --head_type "${HEAD_TYPE:-classification}" \
-  --discogem_label_level "${DISCOGEM_LABEL_LEVEL:-level2}" \
+  --discogem_label_level "$DISCOGEM_LABEL_LEVEL" \
   --model "$MODEL" \
   --output_dir "$OUTPUT_DIR" \
   --num_epochs "${NUM_EPOCHS:-20}" \

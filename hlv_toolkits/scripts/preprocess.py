@@ -27,9 +27,9 @@ def _process_snli(output_dir: Path, splits: Iterable[str]) -> None:
 
 def _process_chaosnli(args: argparse.Namespace, output_dir: Path) -> None:
     split_paths = {
-        "train": args.chaosnli_train_path,
-        "dev": args.chaosnli_dev_path,
-        "test": args.chaosnli_test_path,
+        "train": "data/external/chaosnli/chaosNLI_snli_train.jsonl",
+        "dev": "data/external/chaosnli/chaosNLI_snli_dev.jsonl",
+        "test": "",
     }
     for split, input_path in split_paths.items():
         if not input_path:
@@ -64,15 +64,15 @@ def _merge_discogem_samples(soft_samples, hard_samples) -> List[DiscoGeMMultiLev
 
 def _process_discogem(args: argparse.Namespace, output_dir: Path) -> None:
     soft_reader = DiscoGeMReader(
-        data_path=args.discogem_path,
-        version=args.discogem_version,
+        data_path="data/external/DiscoGeM/DiscoGeM 2.0/DiscoGeM2.0_annotation.tgz",
+        version="2.0",
         label_mode="soft",
         label_level="all",
         language=args.discogem_language,
     )
     hard_reader = DiscoGeMReader(
-        data_path=args.discogem_path,
-        version=args.discogem_version,
+        data_path="data/external/DiscoGeM/DiscoGeM 2.0/DiscoGeM2.0_annotation.tgz",
+        version="2.0",
         label_mode="hard",
         label_level="all",
         language=args.discogem_language,
@@ -114,37 +114,6 @@ def main() -> None:
         help="Splits to materialize (used for snli and discogem)",
     )
     parser.add_argument(
-        "--chaosnli_train_path",
-        type=str,
-        default=None,
-        help="Input ChaosNLI train JSONL path",
-    )
-    parser.add_argument(
-        "--chaosnli_dev_path",
-        type=str,
-        default=None,
-        help="Input ChaosNLI dev JSONL path",
-    )
-    parser.add_argument(
-        "--chaosnli_test_path",
-        type=str,
-        default=None,
-        help="Input ChaosNLI test JSONL path",
-    )
-    parser.add_argument(
-        "--discogem_path",
-        type=str,
-        default="",
-        help="Path to the DiscoGeM 2.0 annotation archive",
-    )
-    parser.add_argument(
-        "--discogem_version",
-        type=str,
-        default="2.0",
-        choices=["auto", "2.0"],
-        help="DiscoGeM schema version",
-    )
-    parser.add_argument(
         "--discogem_language",
         type=str,
         default="en",
@@ -156,10 +125,6 @@ def main() -> None:
     if args.source == "snli":
         _process_snli(args.output_dir / args.source, args.splits)
     elif args.source == "chaosnli":
-        if not any([args.chaosnli_train_path, args.chaosnli_dev_path, args.chaosnli_test_path]):
-            raise ValueError(
-                "At least one of --chaosnli_train_path/--chaosnli_dev_path/--chaosnli_test_path is required when --source chaosnli"
-            )
         _process_chaosnli(args, args.output_dir / args.source)
     elif args.source == "discogem":
         _process_discogem(args, args.output_dir)

@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR/../.."
+
+
 MODEL="${MODEL:-roberta-base}"
+DEVICE="${DEVICE:-auto}"
 OUTPUT_DIR="${OUTPUT_DIR:-./outputs/chaosnli/soft}"
-PROCESSED_DATA_DIR="${PROCESSED_DATA_DIR:-data/processed/chaosnli}"
 SEEDS="${SEEDS:-42}"
 SOFT_LABEL_LOSS="${SOFT_LABEL_LOSS:-cross_entropy}"
 SOFT_LABEL_METRIC="${SOFT_LABEL_METRIC:-tvd}"
 
 uv run python -m hlv_toolkits.scripts.train \
+  --device "$DEVICE" \
   --data_source processed \
-  --processed_data_dir "$PROCESSED_DATA_DIR" \
   --use_soft_labels \
   --soft_label_loss "$SOFT_LABEL_LOSS" \
   --soft_label_metric_for_best_model "$SOFT_LABEL_METRIC" \

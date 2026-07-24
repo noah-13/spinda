@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR/../.."
+
 # Default DiscoGeM file expected by the training CLI.
-DISCOGEM_PATH="${DISCOGEM_PATH:-data/external/DiscoGeM/DiscoGeM 2.0/DiscoGeM2.0_annotation.tgz}"
 DISCOGEM_VERSION="${DISCOGEM_VERSION:-2.0}"
 DISCOGEM_LABEL_MODE="${DISCOGEM_LABEL_MODE:-soft}"
 DISCOGEM_LABEL_LEVELS="${DISCOGEM_LABEL_LEVELS:-level1 level2 level3}"
 DISCOGEM_LANGUAGE="${DISCOGEM_LANGUAGE:-en}"
 DISCOGEM_DATA_FILE="${DISCOGEM_DATA_FILE:-data/processed/discogem.jsonl}"
-WANDB_PROJECT="${WANDB_PROJECT:-hlv}"
+WANDB_PROJECT="${WANDB_PROJECT:-discogem}"
 WANDB_ENTITY="${WANDB_ENTITY:-noah103374955-ludwig-maximilianuniversity-of-munich}"
 WANDB_GROUP="${WANDB_GROUP:-discogem}"
 WANDB_JOB_TYPE="${WANDB_JOB_TYPE:-screen}"
-OUT_ROOT="${OUT_ROOT:-outputs/discogem/runs}"
+OUT_ROOT="${OUT_ROOT:-outputs/discogem/screen}"
 SEED="${SEED:-42}"
 NUM_EPOCHS="${NUM_EPOCHS:-30}"
 LEARNING_RATE="${LEARNING_RATE:-2e-5}"
@@ -20,12 +22,9 @@ TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-64}"
 EVAL_BATCH_SIZE="${EVAL_BATCH_SIZE:-128}"
 MAX_LENGTH="${MAX_LENGTH:-0}"
 GRAD_ACCUM="${GRAD_ACCUM:-1}"
-TEST_PRED_ROOT="${TEST_PRED_ROOT:-outputs/discogem/predictions_test}"
-TEST_EVAL_ROOT="${TEST_EVAL_ROOT:-outputs/discogem/results_test}"
-MULTILEVEL_TEST_PRED_ROOT="${MULTILEVEL_TEST_PRED_ROOT:-outputs/discogem/predictions_test_multilevel}"
-MULTILEVEL_TEST_EVAL_ROOT="${MULTILEVEL_TEST_EVAL_ROOT:-outputs/discogem/results_test_multilevel}"
 TEST_BATCH_SIZE="${TEST_BATCH_SIZE:-64}"
 TEST_DEVICE="${TEST_DEVICE:-cuda}"
+DEVICE="${DEVICE:-auto}"
 FORCE_RERUN="${FORCE_RERUN:-0}"
 
 # Single A100 80GB: keep the defaults and run serially.
@@ -44,15 +43,13 @@ MODELS=(
 RUN_SPECS=(
   "classification|soft_label_loss|cross_entropy"
   "classification|soft_label_loss|kl_div"
-  "per_label_regression|regression_loss|mse"
-  "per_label_regression|regression_loss|bce"
+  "classification|soft_label_loss|mse"
 )
 
 MULTILEVEL_RUN_SPECS=(
   "multilevel_classification|soft_label_loss|cross_entropy"
   "multilevel_classification|soft_label_loss|kl_div"
-  "multilevel_regression|regression_loss|mse"
-  "multilevel_regression|regression_loss|bce"
+  "multilevel_classification|soft_label_loss|mse"
 )
 
 format_duration() {
@@ -117,11 +114,9 @@ run_train() {
 
   cmd=(
     uv run python -m hlv_toolkits.scripts.train
+    --device "$DEVICE"
     --data_source processed
     --processed_task discogem
-    --processed_data_dir "$DISCOGEM_DATA_FILE"
-    --discogem_path "$DISCOGEM_PATH"
-    --discogem_version "$DISCOGEM_VERSION"
     --discogem_label_mode "$DISCOGEM_LABEL_MODE"
     --discogem_label_level "$label_level"
     --discogem_language "$DISCOGEM_LANGUAGE"
@@ -149,9 +144,6 @@ run_train() {
     classification)
       cmd+=( --soft_label_loss "$loss_value" )
       ;;
-    per_label_regression)
-      cmd+=( --regression_loss "$loss_value" )
-      ;;
     *)
       echo "Unsupported head: $head" >&2
       exit 1
@@ -174,11 +166,9 @@ run_train_multilevel() {
 
   cmd=(
     uv run python -m hlv_toolkits.scripts.train
+    --device "$DEVICE"
     --data_source processed
     --processed_task discogem
-    --processed_data_dir "$DISCOGEM_DATA_FILE"
-    --discogem_path "$DISCOGEM_PATH"
-    --discogem_version "$DISCOGEM_VERSION"
     --discogem_label_mode "$DISCOGEM_LABEL_MODE"
     --discogem_label_level all
     --discogem_language "$DISCOGEM_LANGUAGE"
@@ -207,7 +197,6 @@ run_train_multilevel() {
       cmd+=( --soft_label_loss "$loss_value" )
       ;;
     multilevel_regression)
-      cmd+=( --regression_loss "$loss_value" )
       ;;
     *)
       echo "Unsupported multilevel head: $head" >&2
@@ -229,17 +218,33 @@ run_test() {
   local out_dir="$OUT_ROOT/${label_level}/${safe_model}__${head}__${loss_kind}_${loss_value}"
   local model_dir="$out_dir/seed_${SEED}/final_model"
   local run_tag="${label_level}__${safe_model}__${head}__${loss_kind}_${loss_value}__seed_${SEED}"
-  local pred_file="$TEST_PRED_ROOT/${run_tag}__test.jsonl"
-  local eval_file="$TEST_EVAL_ROOT/${run_tag}__test_eval.json"
+  local test_dir="$out_dir/seed_${SEED}/test"
+  local pred_file="$test_dir/predictions.jsonl"
+  local eval_file="$test_dir/evaluation.json"
 
   if [[ ! -d "$model_dir" ]]; then
     echo "Missing final_model for test: $model_dir" >&2
     exit 1
   fi
 
-  uv run python -m hlv_toolkits.scripts.predict     --model_path "$model_dir"     --data_source processed     --processed_task discogem     --processed_data_dir "$DISCOGEM_DATA_FILE"     --split test     --output_file "$pred_file"     --batch_size "$TEST_BATCH_SIZE"     --max_length "$MAX_LENGTH"     --device "$TEST_DEVICE"
+  echo "Starting test: $model | level=$label_level | head=$head | $loss_kind=$loss_value"
+  echo "Test predictions: $pred_file"
+  echo "Test evaluation: $eval_file"
 
-  uv run python -m hlv_toolkits.scripts.evaluate     --predictions "$pred_file"     --ground_truth_source processed     --ground_truth_split test     --processed_data_dir "$DISCOGEM_DATA_FILE"     --output_file "$eval_file"     --no-plot     --no-ternary_browser
+  uv run python -m hlv_toolkits.scripts.predict     --model_path "$model_dir"     --data_source processed     --processed_task discogem     --split test     --discogem_label_level "$label_level"     --discogem_label_mode "$DISCOGEM_LABEL_MODE"     --output_file "$pred_file"     --batch_size "$TEST_BATCH_SIZE"     --max_length "$MAX_LENGTH"     --device "$TEST_DEVICE"
+
+  uv run python -m hlv_toolkits.scripts.evaluate \
+    --predictions "$pred_file" \
+    --ground_truth_source processed \
+    --processed_task discogem \
+    --ground_truth_split test \
+    --discogem_label_level "$label_level" \
+    --discogem_label_mode "$DISCOGEM_LABEL_MODE" \
+    --output_file "$eval_file" \
+    --no-plot \
+    --no-ternary_browser
+
+  echo "Test completed: $eval_file"
 }
 
 run_test_multilevel() {
@@ -252,17 +257,33 @@ run_test_multilevel() {
   local out_dir="$OUT_ROOT/multilevel/${safe_model}__${head}__${loss_kind}_${loss_value}"
   local model_dir="$out_dir/seed_${SEED}/final_model"
   local run_tag="multilevel__${safe_model}__${head}__${loss_kind}_${loss_value}__seed_${SEED}"
-  local pred_file="$MULTILEVEL_TEST_PRED_ROOT/${run_tag}__test.jsonl"
-  local eval_file="$MULTILEVEL_TEST_EVAL_ROOT/${run_tag}__test_eval.json"
+  local test_dir="$out_dir/seed_${SEED}/test"
+  local pred_file="$test_dir/predictions.jsonl"
+  local eval_file="$test_dir/evaluation.json"
 
   if [[ ! -d "$model_dir" ]]; then
     echo "Missing final_model for test: $model_dir" >&2
     exit 1
   fi
 
-  uv run python -m hlv_toolkits.scripts.predict     --model_path "$model_dir"     --data_source processed     --processed_task discogem     --processed_data_dir "$DISCOGEM_DATA_FILE"     --split test     --output_file "$pred_file"     --batch_size "$TEST_BATCH_SIZE"     --max_length "$MAX_LENGTH"     --device "$TEST_DEVICE"
+  echo "Starting multilevel test: $model | head=$head | $loss_kind=$loss_value"
+  echo "Test predictions: $pred_file"
+  echo "Test evaluation: $eval_file"
 
-  uv run python -m hlv_toolkits.scripts.evaluate     --predictions "$pred_file"     --ground_truth_source processed     --ground_truth_split test     --processed_data_dir "$DISCOGEM_DATA_FILE"     --no-plot     --no-ternary_browser
+  uv run python -m hlv_toolkits.scripts.predict     --model_path "$model_dir"     --data_source processed     --processed_task discogem     --split test     --discogem_label_level all     --discogem_label_mode "$DISCOGEM_LABEL_MODE"     --output_file "$pred_file"     --batch_size "$TEST_BATCH_SIZE"     --max_length "$MAX_LENGTH"     --device "$TEST_DEVICE"
+
+  uv run python -m hlv_toolkits.scripts.evaluate \
+    --predictions "$pred_file" \
+    --ground_truth_source processed \
+    --processed_task discogem \
+    --ground_truth_split test \
+    --discogem_label_level all \
+    --discogem_label_mode "$DISCOGEM_LABEL_MODE" \
+    --output_file "$eval_file" \
+    --no-plot \
+    --no-ternary_browser
+
+  echo "Multilevel test completed: $eval_file"
 }
 
 get_run_state() {
@@ -275,7 +296,7 @@ get_run_state() {
   local out_dir="$OUT_ROOT/${label_level}/${safe_model}__${head}__${loss_kind}_${loss_value}"
   local model_dir="$out_dir/seed_${SEED}/final_model"
   local run_tag="${label_level}__${safe_model}__${head}__${loss_kind}_${loss_value}__seed_${SEED}"
-  local eval_file="$TEST_EVAL_ROOT/${run_tag}__test_eval.json"
+  local eval_file="$out_dir/seed_${SEED}/test/evaluation.json"
 
   if [[ "$FORCE_RERUN" == "1" ]]; then
     echo pending
@@ -297,7 +318,7 @@ get_multilevel_run_state() {
   local out_dir="$OUT_ROOT/multilevel/${safe_model}__${head}__${loss_kind}_${loss_value}"
   local model_dir="$out_dir/seed_${SEED}/final_model"
   local run_tag="multilevel__${safe_model}__${head}__${loss_kind}_${loss_value}__seed_${SEED}"
-  local eval_file="$MULTILEVEL_TEST_EVAL_ROOT/${run_tag}__test_eval.json"
+  local eval_file="$out_dir/seed_${SEED}/test/evaluation.json"
 
   if [[ "$FORCE_RERUN" == "1" ]]; then
     echo pending
@@ -310,19 +331,18 @@ get_multilevel_run_state() {
   fi
 }
 
-read -r estimated_completed estimated_avg_seconds <<< "$(OUT_ROOT="$OUT_ROOT" TEST_EVAL_ROOT="$TEST_EVAL_ROOT" SEED="$SEED" python3 - <<'PY2'
+read -r estimated_completed estimated_avg_seconds <<< "$(OUT_ROOT="$OUT_ROOT" SEED="$SEED" python3 - <<'PY2'
 from pathlib import Path
 from statistics import mean
 import os
 out_root = Path(os.environ['OUT_ROOT'])
-eval_root = Path(os.environ['TEST_EVAL_ROOT'])
 seed = os.environ['SEED']
 runtimes = []
 for final_model in out_root.glob(f'**/seed_{seed}/final_model'):
     seed_dir = final_model.parent
     run_name = final_model.parent.parent.name
     level_name = final_model.parent.parent.parent.name
-    eval_file = eval_root / f'{level_name}__{run_name}__seed_{seed}__test_eval.json'
+    eval_file = seed_dir / 'test' / 'evaluation.json'
     checkpoints = list(seed_dir.glob('checkpoint-*/trainer_state.json'))
     if not checkpoints or not eval_file.exists():
         continue

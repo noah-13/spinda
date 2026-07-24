@@ -85,6 +85,18 @@ class ProcessedJSONLReader(BaseReader):
                 except json.JSONDecodeError as e:
                     raise ValueError(f"Invalid JSON on line {line_num} in {path}: {e}")
                 sample = sample_from_json_dict(payload)
+
+                # A single processed JSONL file can contain train/dev/test rows.
+                # Filter by the requested split before projecting labels; otherwise
+                # load_train/load_dev/load_test would all read the complete file.
+                sample_split = getattr(sample, "split", None)
+                target_split = "dev" if split in {"valid", "validation"} else str(split)
+                normalized_sample_split = (
+                    "dev" if sample_split in {"valid", "validation"} else str(sample_split)
+                )
+                if sample_split is not None and normalized_sample_split != target_split:
+                    continue
+
                 if self.task == "discogem" and isinstance(sample, DiscoGeMMultiLevelSample):
                     samples.append(self._project_discogem(sample))
                 else:

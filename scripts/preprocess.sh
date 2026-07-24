@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR/.."
+
+
 SOURCE="${1:-${SOURCE:-}}"
 if [[ -z "$SOURCE" ]]; then
   echo "Usage: $0 <snli|chaosnli|discogem>" >&2
@@ -17,19 +21,18 @@ case "$SOURCE" in
       --output_dir "$OUTPUT_DIR"
     ;;
   chaosnli)
+    uv run python -m hlv_toolkits.scripts.download_data chaosnli \
+      --chaosnli-dir "${CHAOSNLI_DIR:-data/external/chaosnli}"
     uv run python -m hlv_toolkits.scripts.preprocess \
       --source chaosnli \
       --output_dir "$OUTPUT_DIR" \
-      --chaosnli_train_path "${CHAOSNLI_TRAIN_PATH:-data/external/chaosnli/chaosNLI_snli_train.jsonl}" \
-      --chaosnli_dev_path "${CHAOSNLI_DEV_PATH:-data/external/chaosnli/chaosNLI_snli_dev.jsonl}" \
-      --chaosnli_test_path "${CHAOSNLI_TEST_PATH:-}"
     ;;
   discogem)
+    uv run python -m hlv_toolkits.scripts.download_data discogem \
+      --discogem-path "${DISCOGEM_PATH:-data/external/DiscoGeM/DiscoGeM 2.0/DiscoGeM2.0_annotation.tgz}"
     uv run python -m hlv_toolkits.scripts.preprocess \
       --source discogem \
       --output_dir "$OUTPUT_DIR" \
-      --discogem_path "${DISCOGEM_PATH:-data/external/DiscoGeM/DiscoGeM 2.0/DiscoGeM2.0_annotation.tgz}" \
-      --discogem_version "${DISCOGEM_VERSION:-2.0}" \
       --discogem_language "${DISCOGEM_LANGUAGE:-en}"
     ;;
   *)

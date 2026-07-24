@@ -281,38 +281,11 @@ def main() -> None:
     )
     
     parser.add_argument(
-        "--chaosnli_path",
-        type=str,
-        default="data/external/chaosnli/chaosNLI_snli.jsonl",
-        help="Path to ChaosNLI JSONL file (required if ground_truth_source=chaosnli)",
-    )
-    parser.add_argument(
-        "--processed_data_dir",
-        type=str,
-        default="",
-        help="Directory or file containing canonical JSONL samples",
-    )
-    parser.add_argument(
         "--processed_task",
         type=str,
         default="nli",
         choices=["nli", "discogem"],
-        help="Task type stored in processed_data_dir",
-    )
-
-    parser.add_argument(
-        "--discogem_path",
-        type=str,
-        default="",
-        help="Path to the DiscoGeM 2.0 annotation archive. If empty, infer the default local path.",
-    )
-
-    parser.add_argument(
-        "--discogem_version",
-        type=str,
-        default="auto",
-        choices=["auto", "2.0"],
-        help="DiscoGeM schema version",
+        help="Task type stored under data/processed",
     )
 
     parser.add_argument(
@@ -415,24 +388,25 @@ def main() -> None:
         reader = SNLIReader()
         ground_truth = reader.load_split(args.ground_truth_split)
     elif args.ground_truth_source == "chaosnli":
-        if args.chaosnli_path is None:
-            raise ValueError("--chaosnli_path is required when ground_truth_source=chaosnli")
-        reader = ChaosNLIReader(data_path=args.chaosnli_path)
+        reader = ChaosNLIReader(data_path="data/external/chaosnli/chaosNLI_snli.jsonl")
         ground_truth = reader.load_split(args.ground_truth_split)
     elif args.ground_truth_source == "discogem":
         reader = DiscoGeMReader(
-            data_path=args.discogem_path or None,
-            version=args.discogem_version,
+            data_path="data/external/DiscoGeM/DiscoGeM 2.0/DiscoGeM2.0_annotation.tgz",
+            version="2.0",
             label_mode=args.discogem_label_mode,
             label_level=args.discogem_label_level,
             language=args.discogem_language,
         )
         ground_truth = reader.load_split(args.ground_truth_split)
     elif args.ground_truth_source == "processed":
-        if not args.processed_data_dir:
-            raise ValueError("--processed_data_dir is required when ground_truth_source=processed")
+        processed_data_dir = (
+            "data/processed/discogem.jsonl"
+            if args.processed_task == "discogem"
+            else "data/processed/nli"
+        )
         reader = ProcessedJSONLReader(
-            data_path=args.processed_data_dir,
+            data_path=processed_data_dir,
             task=args.processed_task,
             label_level=args.discogem_label_level,
             label_mode=args.discogem_label_mode,

@@ -12,6 +12,8 @@ Example usage:
 import argparse
 from pathlib import Path
 
+import torch
+
 from hlv_toolkits.data import (
     ChaosNLIReader,
     DiscoGeMReader,
@@ -34,6 +36,12 @@ def main() -> None:
         default="roberta-base",
         help="Pre-trained model to fine-tune",
     )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="auto",
+        help="Training device: auto, cpu, cuda, or a specific GPU such as cuda:1",
+    )
 
     # Data configuration
     parser.add_argument(
@@ -44,49 +52,18 @@ def main() -> None:
         help="Training data source",
     )
     parser.add_argument(
-        "--chaosnli_train_path",
-        type=str,
-        default="data/external/chaosnli/chaosNLI_snli_train.jsonl",
-        help="Path to ChaosNLI train JSONL (default: data/external/chaosnli/chaosNLI_snli_train.jsonl)",
-    )
-    parser.add_argument(
-        "--chaosnli_dev_path",
-        type=str,
-        default="data/external/chaosnli/chaosNLI_snli_dev.jsonl",
-        help="Path to ChaosNLI dev JSONL (default: data/external/chaosnli/chaosNLI_snli_dev.jsonl; set to empty or override to disable evaluation)",
-    )
-    parser.add_argument(
-        "--processed_data_dir",
-        type=str,
-        default="",
-        help="Directory or file containing canonical JSONL samples",
-    )
-    parser.add_argument(
         "--processed_task",
         type=str,
         default="nli",
         choices=["nli", "discogem"],
-        help="Task type stored in processed_data_dir",
+        help="Task type for processed data (stored under data/processed)",
     )
     parser.add_argument(
-        "--discogem_path",
+        "--discogem_language",
         type=str,
-        default="",
-        help="Path to the DiscoGeM 2.0 annotation archive. If empty, infer the default local path.",
-    )
-    parser.add_argument(
-        "--discogem_version",
-        type=str,
-        default="auto",
-        choices=["auto", "2.0"],
-        help="DiscoGeM schema version",
-    )
-    parser.add_argument(
-        "--discogem_label_mode",
-        type=str,
-        default="soft",
-        choices=["soft", "hard"],
-        help="Label mode for DiscoGeM training",
+        default="en",
+        choices=["en", "de", "fr", "cs"],
+        help="DiscoGeM language slice to use for version 2.0",
     )
     parser.add_argument(
         "--discogem_label_level",
@@ -96,11 +73,11 @@ def main() -> None:
         help="DiscoGeM label granularity",
     )
     parser.add_argument(
-        "--discogem_language",
+        "--discogem_label_mode",
         type=str,
-        default="en",
-        choices=["en", "de", "fr", "cs"],
-        help="DiscoGeM language slice to use for version 2.0",
+        default="soft",
+        choices=["soft", "hard"],
+        help="DiscoGeM label mode",
     )
 
     # Training hyperparameters
@@ -131,13 +108,14 @@ def main() -> None:
     parser.add_argument(
         "--use_soft_labels",
         action="store_true",
+        default=None,
         help="Train with distribution targets (requires data with human label distributions)",
     )
     parser.add_argument(
         "--soft_label_loss",
         type=str,
         default="cross_entropy",
-        choices=["cross_entropy", "kl_div"],
+        choices=["cross_entropy", "kl_div", "mse"],
         help="Loss to use when --use_soft_labels is enabled",
     )
     parser.add_argument(
@@ -152,7 +130,7 @@ def main() -> None:
         "--head_type",
         type=str,
         default="classification",
-        choices=["classification", "joint_classification", "per_label_regression", "multilevel_classification", "multilevel_regression"],
+        choices=["classification", "joint_classification", "multilevel_classification", "multilevel_regression"],
         help="Model head type",
     )
     parser.add_argument(
@@ -161,14 +139,6 @@ def main() -> None:
         default=0.5,
         help="Lambda in L = lambda * CE_hard + (1-lambda) * KL_soft for joint_classification",
     )
-    parser.add_argument(
-        "--regression_loss",
-        type=str,
-        default="mse",
-        choices=["mse", "bce"],
-        help="Loss for per_label_regression head",
-    )
-
     # Output configuration
     parser.add_argument(
         "--output_dir",
@@ -186,6 +156,12 @@ def main() -> None:
         help="List of random seeds for training (default: 42)",
     )
     parser.add_argument("--fp16", action="store_true", help="Use mixed precision training")
+    parser.add_argument(
+        "--dataloader_num_workers",
+        type=int,
+        default=2,
+        help="Number of DataLoader worker processes (use 0 to disable multiprocessing)",
+    )
 
     # Wandb settings
     parser.add_argument("--use_wandb", action="store_true", help="Enable Weights & Biases logging")
@@ -221,6 +197,21 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+    device = args.device
+    if device == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    if device.startswith("cuda"):
+        if not torch.cuda.is_available():
+            raise RuntimeError(f"Requested {device}, but CUDA is not available.")
+        if device == "cuda":
+            device = "cuda:0"
+        try:
+            torch.cuda.set_device(torch.device(device))
+        except (RuntimeError, ValueError, IndexError) as exc:
+            raise ValueError(f"Invalid CUDA device '{device}'. Available GPU count: {torch.cuda.device_count()}") from exc
+    elif device != "cpu":
+        raise ValueError("--device must be one of auto, cpu, cuda, or cuda:<index>")
+    print(f"Using device: {device}")
 
     # Load data
     print(f"Loading dataset from source: {args.data_source}")
@@ -239,22 +230,21 @@ def main() -> None:
         train_samples = reader.load_train()
         eval_samples = reader.load_dev()
     elif args.data_source == "chaosnli":
-        if not args.chaosnli_train_path:
-            raise ValueError("--chaosnli_train_path is required when --data_source chaosnli")
-
-        train_reader = ChaosNLIReader(data_path=args.chaosnli_train_path)
+        train_reader = ChaosNLIReader(data_path="data/external/chaosnli/chaosNLI_snli_train.jsonl")
         train_samples = train_reader.load_train()
 
-        if args.chaosnli_dev_path:
-            eval_reader = ChaosNLIReader(data_path=args.chaosnli_dev_path)
-            eval_samples = eval_reader.load_dev()
-        else:
-            eval_samples = None
-            print("No --chaosnli_dev_path provided: training without evaluation set.")
+        eval_reader = ChaosNLIReader(data_path="data/external/chaosnli/chaosNLI_snli_dev.jsonl")
+        eval_samples = eval_reader.load_dev()
     elif args.data_source == "processed":
-        if not args.processed_data_dir:
-            raise ValueError("--processed_data_dir is required when --data_source processed")
+        processed_data_dir = (
+            "data/processed/discogem.jsonl"
+            if args.processed_task == "discogem"
+            else "data/processed/nli"
+        )
         if args.processed_task == "discogem":
+            # Keep processed DiscoGeM behavior consistent with raw DiscoGeM:
+            # soft mode must activate distributional labels, losses, and metrics.
+            args.use_soft_labels = args.discogem_label_mode == "soft"
             if multilevel_head and args.discogem_label_level != "all":
                 raise ValueError("Multilevel DiscoGeM heads require --discogem_label_level all.")
             if not multilevel_head and args.discogem_label_level == "all":
@@ -265,20 +255,21 @@ def main() -> None:
                 level_sizes = get_discogem_level_num_labels()
                 multilevel_label_sizes = tuple(level_sizes[level] for level in ("level1", "level2", "level3"))
             reader = ProcessedJSONLReader(
-                data_path=args.processed_data_dir,
+                data_path=processed_data_dir,
                 task="discogem",
                 label_level=args.discogem_label_level,
                 label_mode=args.discogem_label_mode,
                 language=args.discogem_language,
             )
         else:
-            reader = ProcessedJSONLReader(data_path=args.processed_data_dir, task="nli")
+            reader = ProcessedJSONLReader(data_path=processed_data_dir, task="nli")
         train_samples = reader.load_train()
         eval_samples = reader.load_dev()
     else:
-        # DiscoGeM mode controls soft/hard labels; keep --use_soft_labels for compatibility.
+        # DiscoGeM mode is the source of truth for soft/hard labels. Keep
+        # --use_soft_labels as a backwards-compatible, optional override hint.
         discogem_soft = args.discogem_label_mode == "soft"
-        if args.use_soft_labels != discogem_soft:
+        if args.use_soft_labels is not None and args.use_soft_labels != discogem_soft:
             print(
                 "Warning: --use_soft_labels overridden by --discogem_label_mode "
                 f"({args.discogem_label_mode})."
@@ -296,8 +287,8 @@ def main() -> None:
             multilevel_label_sizes = tuple(level_sizes[level] for level in ("level1", "level2", "level3"))
 
         reader = DiscoGeMReader(
-            data_path=args.discogem_path or None,
-            version=args.discogem_version,
+            data_path="data/external/DiscoGeM/DiscoGeM 2.0/DiscoGeM2.0_annotation.tgz",
+            version="2.0",
             label_mode=args.discogem_label_mode,
             label_level=args.discogem_label_level,
             language=args.discogem_language,
@@ -305,11 +296,14 @@ def main() -> None:
         train_samples = reader.load_train()
         eval_samples = reader.load_dev()
 
+    args.use_soft_labels = bool(args.use_soft_labels)
+
     if args.head_type == "joint_classification" and not args.use_soft_labels:
-        raise ValueError("joint_classification requires soft distributions. Enable --use_soft_labels or use soft DiscoGeM mode.")
+        raise ValueError("joint_classification requires soft distributions. Enable soft labels or use soft DiscoGeM mode.")
 
     print(f"Loaded {len(train_samples)} training samples")
     print(f"Loaded {0 if eval_samples is None else len(eval_samples)} evaluation samples")
+    print(f"Using soft labels: {args.use_soft_labels}")
 
     # Train with multiple seeds
     seeds = args.seeds
@@ -346,12 +340,13 @@ def main() -> None:
             soft_label_loss=args.soft_label_loss,
             soft_label_metric_for_best_model=args.soft_label_metric_for_best_model,
             head_type=args.head_type,
-            regression_loss=args.regression_loss,
             joint_loss_lambda=args.joint_loss_lambda,
             multilevel_label_sizes=multilevel_label_sizes,
             output_dir=str(seed_output_dir),
             seed=seed,
             fp16=args.fp16,
+            device=device,
+            dataloader_num_workers=args.dataloader_num_workers,
             use_wandb=args.use_wandb,
             wandb_project=args.wandb_project,
             wandb_entity=args.wandb_entity,
@@ -369,7 +364,7 @@ def main() -> None:
         print(f"Training completed for seed {seed}!")
 
     print(f"\n{'='*60}")
-    print(f"All training runs completed! Results saved in: {args.output_dir}")
+    print(f"All requested seed runs completed! Results saved in: {args.output_dir}")
     print(f"{'='*60}")
 
 

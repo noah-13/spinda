@@ -66,12 +66,14 @@ def find_repo_root(start: Path) -> Path:
 
 ROOT = find_repo_root(Path.cwd())
 RUN_ROOT = ROOT / __RUN_ROOT__
-RESULT_ROOT = ROOT / __RESULT_ROOT__
-MULTILEVEL_RESULT_ROOT = ROOT / __MULTILEVEL_RESULT_ROOT__
+SINGLE_RUN_ROOT = ROOT / 'outputs/discogem/runs/single'
+RESULT_ROOT = RUN_ROOT
+MULTILEVEL_RESULT_ROOT = RUN_ROOT / 'multilevel'
 DISCOGEM_PATH = ROOT / __DISCOGEM_PATH__
 DISCOGEM_LANGUAGE = __DISCOGEM_LANGUAGE__
 print('ROOT =', ROOT)
-print('RUN_ROOT exists =', RUN_ROOT.exists())
+print('SCREEN_ROOT exists =', RUN_ROOT.exists())
+print('SINGLE_RUN_ROOT exists =', SINGLE_RUN_ROOT.exists())
 print('RESULT_ROOT exists =', RESULT_ROOT.exists())
 print('MULTILEVEL_RESULT_ROOT exists =', MULTILEVEL_RESULT_ROOT.exists())
 print('DISCOGEM_PATH exists =', DISCOGEM_PATH.exists())
@@ -103,6 +105,14 @@ def parse_result_name(name: str) -> dict:
     }
 
 
+def parse_new_result_path(path: Path) -> dict:
+    # New layout: .../<level>/<run>/seed_<n>/test/evaluation.json
+    seed_dir = path.parent.parent
+    run_dir = seed_dir.parent
+    level = run_dir.parent.name
+    return parse_result_name(f'{level}__{run_dir.name}__{seed_dir.name}__test_eval.json')
+
+
 def load_json(path: Path):
     with open(path, 'r', encoding='utf-8') as f:
         return json.load(f)
@@ -130,6 +140,8 @@ def extract_eval_history(trainer_state: dict) -> pd.DataFrame:
 def collect_screening_runs(run_root: Path) -> tuple[pd.DataFrame, dict]:
     summary_rows = []
     histories = {}
+    if not run_root.exists():
+        return pd.DataFrame(), histories
 
     for level_dir in sorted(p for p in run_root.iterdir() if p.is_dir()):
         level = level_dir.name
@@ -185,8 +197,8 @@ def collect_test_results(result_roots: dict[str, Path]) -> pd.DataFrame:
     for result_mode, result_root in result_roots.items():
         if not result_root.exists():
             continue
-        for path in sorted(result_root.glob('*__test_eval.json')):
-            meta = parse_result_name(path.name)
+        for path in sorted(result_root.glob('**/test/evaluation.json')):
+            meta = parse_new_result_path(path)
             payload = load_json(path)
             row = {**meta, 'source_root': result_mode}
             if meta['result_mode'] == 'multilevel' and all(key in payload for key in ('level1', 'level2', 'level3', 'overall')):
@@ -233,8 +245,8 @@ def collect_wall_clock_summary(run_root: Path, result_roots: dict[str, Path]) ->
     for result_mode, result_root in result_roots.items():
         if not result_root.exists():
             continue
-        for eval_path in result_root.glob('*__test_eval.json'):
-            meta = parse_result_name(eval_path.name)
+        for eval_path in result_root.glob('**/test/evaluation.json'):
+            meta = parse_new_result_path(eval_path)
             eval_rows.append({'level': meta['level'], 'result_mode': result_mode, 'path': eval_path, 'mtime': eval_path.stat().st_mtime})
 
     rows = []
@@ -269,12 +281,19 @@ def collect_wall_clock_summary(run_root: Path, result_roots: dict[str, Path]) ->
 
 
 screen_df, screen_histories = collect_screening_runs(RUN_ROOT)
-result_roots = {'single': RESULT_ROOT, 'multilevel': MULTILEVEL_RESULT_ROOT}
+single_train_df, single_histories = collect_screening_runs(SINGLE_RUN_ROOT)
+if not single_train_df.empty:
+    screen_df = pd.concat([screen_df, single_train_df], ignore_index=True)
+screen_histories.update(single_histories)
+result_roots = {'screen': RESULT_ROOT, 'single': SINGLE_RUN_ROOT}
 test_df = collect_test_results(result_roots)
+# Backward-compatible names used by older notebook cells/scripts.
+discogem_results = test_df.copy()
+discogem_screen = screen_df.copy()
 single_test_df = test_df[test_df['result_mode'] == 'single'].copy() if not test_df.empty else pd.DataFrame()
 multilevel_test_df = test_df[test_df['result_mode'] == 'multilevel'].copy() if not test_df.empty else pd.DataFrame()
-wall_clock_df = collect_wall_clock_summary(RUN_ROOT, result_roots)
-print('screen runs =', len(screen_df))
+wall_clock_df = collect_wall_clock_summary(ROOT / 'outputs/discogem', result_roots)
+print('training runs =', len(screen_df))
 print('test result files =', len(test_df))
 print('single-level test result files =', len(single_test_df))
 print('multilevel test result files =', len(multilevel_test_df))
@@ -283,14 +302,14 @@ print('wall clock rows =', len(wall_clock_df))
         ),
         code_cell(
             """if screen_df.empty:
-    print('No screening runs found under', RUN_ROOT)
+    print('No DiscoGeM runs found under', RUN_ROOT, 'or', SINGLE_RUN_ROOT)
 else:
     display(screen_df[['result_mode', 'level', 'safe_model', 'head', 'loss', 'best_eval_tvd', 'best_eval_kl_divergence', 'best_eval_accuracy', 'best_epoch', 'best_eval_samples_per_second']])
 """
         ),
         code_cell(
             """if test_df.empty:
-    print('No test eval JSON found under', RESULT_ROOT, 'or', MULTILEVEL_RESULT_ROOT)
+    print('No test evaluation JSON found under', RESULT_ROOT, 'or', SINGLE_RUN_ROOT)
 else:
     preferred_cols = ['result_mode', 'level', 'safe_model', 'head', 'loss', 'accuracy', 'tvd_mean', 'jsd_mean', 'kl_mean', 'soft_micro_f1', 'soft_macro_f1', 'distance_correlation', 'overall_accuracy', 'overall_tvd_mean', 'overall_jsd_mean', 'overall_kl_mean', 'overall_soft_micro_f1', 'overall_soft_macro_f1', 'overall_distance_correlation']
     display(test_df[[col for col in preferred_cols if col in test_df.columns]])
@@ -517,6 +536,76 @@ print('Label summary by level')
 display(label_summary_df)
 """
         ),
+        code_cell(
+            """# Align single-level and multilevel runs by concrete label level.
+comparison_metrics = ['accuracy', 'tvd_mean', 'jsd_mean', 'kl_mean', 'soft_micro_f1', 'soft_macro_f1', 'distance_correlation']
+comparison_rows = []
+for _, row in single_test_df.iterrows():
+    item = {
+        'comparison_level': row.get('level'),
+        'source_mode': 'single',
+        'safe_model': row.get('safe_model'),
+        'head': row.get('head'),
+        'loss': row.get('loss'),
+        'seed': row.get('seed'),
+    }
+    for metric in comparison_metrics:
+        item[metric] = row.get(metric)
+    comparison_rows.append(item)
+
+for _, row in multilevel_test_df.iterrows():
+    for level_name in ['level1', 'level2', 'level3', 'overall']:
+        prefix = '' if level_name == 'overall' else level_name + '_'
+        item = {
+            'comparison_level': level_name,
+            'source_mode': 'multilevel',
+            'safe_model': row.get('safe_model'),
+            'head': row.get('head'),
+            'loss': row.get('loss'),
+            'seed': row.get('seed'),
+        }
+        for metric in comparison_metrics:
+            item[metric] = row.get(prefix + metric)
+        comparison_rows.append(item)
+
+level_comparison_df = pd.DataFrame(comparison_rows)
+if not level_comparison_df.empty:
+    level_comparison_df = level_comparison_df.sort_values(
+        ['comparison_level', 'safe_model', 'head', 'loss', 'source_mode', 'seed']
+    ).reset_index(drop=True)
+    level_comparison_summary = (
+        level_comparison_df.groupby(
+            ['comparison_level', 'source_mode', 'safe_model', 'head', 'loss'], as_index=False
+        )[comparison_metrics].mean()
+        .sort_values(['comparison_level', 'tvd_mean', 'kl_mean', 'accuracy'], ascending=[True, True, True, False])
+        .reset_index(drop=True)
+    )
+    print('Level-aligned comparison: single-level vs multilevel')
+    display(level_comparison_summary)
+"""
+        ),
+        code_cell(
+            """# Export the current dashboard tables so Run All refreshes the HTML result page.
+html_path = ROOT / 'notebooks' / 'discogem_results.html'
+html_css = '''<style>body{font-family:Arial,sans-serif;margin:24px;color:#222}h1,h2{margin-top:28px}.table-wrap{overflow-x:auto;margin:12px 0 28px}table{border-collapse:collapse;font-size:12px;white-space:nowrap}th,td{border:1px solid #ccc;padding:5px 7px}th{background:#f2f2f2;position:sticky;top:0}tr:nth-child(even){background:#fafafa}.note{background:#eef6ff;border-left:4px solid #4285f4;padding:10px}</style>'''
+html_parts = [
+    '<!doctype html><html><head><meta charset=\"utf-8\"><title>DiscoGeM results</title>',
+    html_css,
+    '</head><body><h1>DiscoGeM results</h1>',
+    '<div class=\"note\">Generated from the current outputs/discogem layout. Includes all test runs, aggregate comparisons, per-level multilevel metrics, and TVD-ranked results.</div>',
+]
+if discogem_results.empty:
+    html_parts.append('<p>No test evaluation results found.</p>')
+else:
+    html_parts.append(f'<h2>All test runs ({len(discogem_results)})</h2><div class=\"table-wrap\">{discogem_results.to_html(index=False)}</div>')
+    if not level_comparison_df.empty:
+        html_parts.append(f'<h2>Level-aligned detailed comparison (single vs multilevel)</h2><div class=\"table-wrap\">{level_comparison_df.to_html(index=False)}</div>')
+        html_parts.append(f'<h2>Level-aligned mean comparison by model / loss</h2><div class=\"table-wrap\">{level_comparison_summary.to_html(index=False)}</div>')
+html_parts.append('</body></html>')
+html_path.write_text(''.join(html_parts), encoding='utf-8')
+print('Exported HTML:', html_path, 'with', len(discogem_results), 'test results')
+"""
+        ),
     ]
     return {
         'cells': cells,
@@ -531,9 +620,9 @@ display(label_summary_df)
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Generate DiscoGeM dashboard notebook')
-    parser.add_argument('--run-root', default='outputs/discogem/runs', help='Run directory to analyze.')
-    parser.add_argument('--result-root', default='outputs/discogem/results_test', help='Single-level test result directory to analyze.')
-    parser.add_argument('--multilevel-result-root', default='outputs/discogem/results_test_multilevel', help='Multilevel test result directory to analyze.')
+    parser.add_argument('--run-root', default='outputs/discogem/screen', help='Screen run directory to analyze.')
+    parser.add_argument('--result-root', default='outputs/discogem/screen', help='Screen result root; results are nested under each run.')
+    parser.add_argument('--multilevel-result-root', default='outputs/discogem/screen/multilevel', help='Screen multilevel result root.')
     parser.add_argument('--discogem-path', default='data/external/DiscoGeM/DiscoGeM 2.0/DiscoGeM2.0_annotation.tgz', help='Path to DiscoGeM 2.0 annotations archive.')
     parser.add_argument('--discogem-language', default='en', help='Language slice represented in the dashboard.')
     parser.add_argument('--output-notebook', default='notebooks/discogem_experiment_dashboard.ipynb', help='Notebook path to write.')

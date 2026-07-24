@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR/../.."
+
+
 MODEL="${MODEL:-roberta-base}"
+DEVICE="${DEVICE:-auto}"
 OUTPUT_DIR="${OUTPUT_DIR:-./outputs/snli/hard}"
-PROCESSED_DATA_DIR="${PROCESSED_DATA_DIR:-data/processed/snli}"
 SEEDS="${SEEDS:-42}"
 
 uv run python -m hlv_toolkits.scripts.train \
+  --device "$DEVICE" \
   --data_source processed \
-  --processed_data_dir "$PROCESSED_DATA_DIR" \
   --model "$MODEL" \
   --output_dir "$OUTPUT_DIR" \
   --num_epochs "${NUM_EPOCHS:-3}" \
