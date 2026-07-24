@@ -1,17 +1,15 @@
 # HLV Toolkits
 
-HLV Toolkits 用于自然语言推理（NLI）和带有人类意见分布的文本分类实验，覆盖数据准备、预处理、训练、预测、评估和可视化。
+HLV Toolkits is a toolkit for natural language inference (NLI) and distributional-label experiments. It provides data download and preprocessing, model training, prediction, evaluation, visualization, and experiment dashboards.
 
-## 支持范围
+## Datasets
 
-### 数据集
+- **SNLI**: hard-label NLI data loaded through Hugging Face `datasets`.
+- **ChaosNLI**: human label distributions from 100 annotators.
+- **DiscoGeM 2.0**: English, German, French, and Czech discourse-relation data with hierarchical labels and human distributions.
+- **Processed JSONL**: the normalized format used by the training and evaluation scripts.
 
-- **SNLI**：通过 Hugging Face `datasets` 加载，使用单一 hard label。
-- **ChaosNLI**：使用 100 人标注分布，支持 soft-label 训练和分布评估。
-- **DiscoGeM 2.0**：支持英文、德文、法文和捷克文；预处理后同时保留多级 hard labels 和 human distributions。
-- **Processed JSONL**：读取仓库统一生成的规范化 JSONL。
-
-内置数据集使用固定目录，不需要在训练、预测或评估命令中提供路径：
+The default data locations are:
 
 ```text
 data/external/chaosnli/
@@ -19,240 +17,166 @@ data/external/DiscoGeM/DiscoGeM 2.0/
 data/processed/
 ```
 
-自定义数据集目前不是默认 CLI 流程的一部分，后续可以单独增加自定义数据入口。
+## Models and training heads
 
-### Encoder 模型
+Models are loaded with Hugging Face `AutoTokenizer`, `AutoModel`, or `AutoModelForSequenceClassification`. Standard encoder-only models such as BERT, RoBERTa, DeBERTa, XLM-R, ModernBERT, and InfoXLM are supported. Decoder-only and encoder-decoder models are not guaranteed to work with the current NLI interface.
 
-模型通过 Hugging Face 的 `AutoTokenizer`、`AutoModel` 和 `AutoModelForSequenceClassification` 加载。因此，大多数标准 Transformer encoder 都可以使用，例如：
+The training entry point is `hlv_toolkits.scripts.train`. Supported heads are:
 
-- BERT 和 RoBERTa
-- DeBERTa
-- XLM-R
-- ModernBERT
-- InfoXLM
-- 其他提供标准 Hugging Face encoder 接口的模型
+- `classification`
+- `joint_classification`
+- `multilevel_classification` for DiscoGeM
+- `multilevel_regression` for DiscoGeM
 
-模型通过 `--model <model-name-or-local-path>` 指定；模型和 tokenizer 不在本地时，Transformers 会自动从 Hugging Face Hub 下载。
-
-当前目标是标准的 encoder-only 文本模型，并不是任意 Transformer：
-
-- decoder-only 模型（如 GPT、Llama）不保证支持；
-- encoder-decoder 模型（如 T5、BART）不属于当前训练接口；
-- 需要额外实体、图像或特殊输入字段的模型可能无法直接使用；
-- 模型需要提供标准的 hidden states，并能接受 premise/hypothesis 文本对。
-
-### 训练方式
-
-训练入口为 `hlv_toolkits.scripts.train`，支持以下 head 和目标：
-
-- `classification`：普通单标签分类，适合 SNLI hard labels；
-- `joint_classification`：同时使用 hard label 和 soft distribution；
-- `multilevel_classification`：DiscoGeM 多级分类 head；
-- `multilevel_regression`：DiscoGeM 多级回归 head。
-
-Soft-label 训练支持：
+For the current DiscoGeM experiments, `classification` and `multilevel_classification` use a linear output layer followed by softmax for human distributions. The available soft-label losses are:
 
 - `cross_entropy`
 - `kl_div`
+- `mse` — MSE between the softmax-normalized prediction and the human distribution
 
-模型选择指标支持：
+The current experiment screen does not include BCE or `per_label_regression`.
 
-- `accuracy`
-- `tvd`
-- `kl_divergence`
+Model selection can use `accuracy`, `tvd`, or `kl_divergence`. DiscoGeM options include:
 
-DiscoGeM 还支持：
+```text
+--discogem_label_mode soft|hard
+--discogem_label_level level1|level2|level3|all
+--discogem_language en|de|fr|cs
+```
 
-- `--discogem_label_mode soft|hard`
-- `--discogem_label_level level1|level2|level3|all`
-- `--discogem_language en|de|fr|cs`
+## Environment and versions
 
-### 设备选择
+Minimum requirements are defined in `pyproject.toml`:
 
-训练和预测支持：
+- Python `>=3.10`
+- `uv`
+- PyTorch `>=2.2,<2.4`
+- Transformers `>=4.57.6`
+- Accelerate `>=0.26.0`
+- Datasets `>=4.5.0`
+- Weights & Biases `>=0.24.0` for experiment tracking
+
+The current `uv.lock` resolves the main development environment with Python 3.12, PyTorch 2.3.1, Transformers 4.57.6, Accelerate 1.13.0, Datasets 4.5.0, and W&B 0.24.0. The lockfile is the source of truth for reproducible installation.
+
+CUDA is optional for CPU execution. For GPU training, use a CUDA-enabled PyTorch installation and verify the available devices with:
+
+```bash
+nvidia-smi
+uv run python -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.device_count())"
+```
+
+The CLI accepts `auto`, `cpu`, `cuda`, and `cuda:<index>`:
 
 ```text
 --device auto
 --device cpu
 --device cuda
 --device cuda:0
---device cuda:1
 ```
 
-使用 `cuda:1` 可以固定当前进程可见的第 2 张 GPU，不需要设置 `CUDA_VISIBLE_DEVICES`。
+`cuda` is normalized to `cuda:0`; use `cuda:<index>` to select a specific visible GPU.
 
-## 安装
-
-要求 Python `>=3.12`。
+## Installation
 
 ```bash
 uv sync
 ```
 
-可选依赖：
+Optional development and plotting dependencies:
 
 ```bash
 uv sync --extra dev
 uv sync --extra plot
 ```
 
-## 整体流程
+All commands below should be run from the repository root and through `uv run`, so that the locked environment is used.
 
-仓库推荐按以下顺序运行：
+## Workflow
 
 ```text
-下载原始数据
+download data
     ↓
-预处理为规范化 JSONL
+preprocess to normalized JSONL
     ↓
-训练模型
+train
     ↓
-生成预测
+generate predictions
     ↓
-评估和可视化
+evaluate and visualize
 ```
 
-## 1. 下载和预处理
+## 1. Download and preprocess
 
-### 一键预处理
-
-`scripts/preprocess.sh` 会在缺少原始文件时自动下载 ChaosNLI 或 DiscoGeM，然后生成规范化 JSONL。已存在的文件会跳过下载。
+The preprocessing wrapper downloads missing source archives and creates normalized JSONL files. Existing files are not downloaded again.
 
 ```bash
-bash scripts/preprocess.sh snli
-bash scripts/preprocess.sh chaosnli
 bash scripts/preprocess.sh discogem
 ```
 
-ChaosNLI 首次下载后会自动从官方 SNLI 文件生成固定的 1,400 条 train 和 114 条 dev split。
-
-也可以只下载原始数据：
-
-```bash
-uv run python -m hlv_toolkits.scripts.download_data chaosnli
-uv run python -m hlv_toolkits.scripts.download_data discogem
-```
-
-下载源：
-
-- ChaosNLI 官方 ZIP：Dropbox
-- DiscoGeM 2.0 官方 archive：DiscoGeM GitHub 仓库
-
-下载模块支持通过环境变量覆盖下载地址或存储目录，但常规命令不需要提供 path：
-
-```bash
-CHAOSNLI_URL=<url> DISCOGEM_URL=<url> bash scripts/preprocess.sh chaosnli
-CHAOSNLI_DIR=<dir> bash scripts/preprocess.sh chaosnli
-```
-
-生成结果：
+The normalized DiscoGeM file is:
 
 ```text
-data/processed/snli/{train,dev,test}.jsonl
-data/processed/chaosnli/{train,dev}.jsonl
 data/processed/discogem.jsonl
-data/external/DiscoGeM/DiscoGeM 2.0/DiscoGeM2.0_annotation.tgz
-data/external/chaosnli/chaosNLI_snli_train.jsonl
-data/external/chaosnli/chaosNLI_snli_dev.jsonl
 ```
 
-## 2. 训练
+## 2. Training
 
-### SNLI hard-label
-
-```bash
-uv run python -m hlv_toolkits.scripts.train \
-  --data_source snli \
-  --model roberta-base \
-  --device cuda:0 \
-  --output_dir outputs/snli/hard \
-  --num_epochs 3 \
-  --train_batch_size 32 \
-  --eval_batch_size 64 \
-  --seeds 42
-```
-
-### ChaosNLI soft-label
-
-```bash
-uv run python -m hlv_toolkits.scripts.train \
-  --data_source chaosnli \
-  --model roberta-base \
-  --device cuda:1 \
-  --use_soft_labels \
-  --soft_label_loss cross_entropy \
-  --soft_label_metric_for_best_model tvd \
-  --output_dir outputs/chaosnli/soft \
-  --num_epochs 20 \
-  --seeds 42
-```
-
-### DiscoGeM 2.0 soft-label
+### Direct DiscoGeM soft-label training
 
 ```bash
 uv run python -m hlv_toolkits.scripts.train \
   --data_source discogem \
   --model roberta-base \
-  --device cuda:1 \
+  --device cuda:0 \
   --discogem_label_mode soft \
   --discogem_label_level level2 \
   --discogem_language en \
-  --output_dir outputs/discogem/soft \
+  --soft_label_loss mse \
+  --output_dir outputs/discogem/runs/single/level2/roberta-base__classification__soft_label_loss_mse \
   --num_epochs 20 \
   --seeds 42
 ```
 
-### DiscoGeM 2.0 hard-label
-
-```bash
-uv run python -m hlv_toolkits.scripts.train \
-  --data_source discogem \
-  --model microsoft/deberta-v3-base \
-  --device cuda:0 \
-  --discogem_label_mode hard \
-  --discogem_label_level level2 \
-  --output_dir outputs/discogem/hard
-```
-
-### 从 processed 数据训练
-
-如果已经运行过预处理，可以显式使用规范化数据：
-
-```bash
-uv run python -m hlv_toolkits.scripts.train \
-  --data_source processed \
-  --processed_task discogem \
-  --device cuda:0 \
-  --discogem_label_mode soft \
-  --discogem_label_level level2 \
-  --output_dir outputs/discogem/processed
-```
-
-`processed` 模式会根据 `--processed_task` 自动读取 `data/processed/` 下的对应文件。
-
 ### Shell wrappers
 
-所有训练 wrapper 都支持 `DEVICE`：
+```bash
+DEVICE=cuda:0 bash scripts/discogem/train_discogem_soft.sh
+DEVICE=cpu bash scripts/discogem/train_discogem_hard.sh
+```
+
+The focused RoBERTa-base level2 softmax+MSE train/test wrapper is:
 
 ```bash
-DEVICE=cuda:0 bash scripts/snli/train_hard.sh
-DEVICE=cuda:1 bash scripts/snli/train_soft.sh
-DEVICE=cuda:1 bash scripts/discogem/train_discogem_soft.sh
-DEVICE=cpu bash scripts/discogem/train_discogem_hard.sh
+MODEL=roberta-base DISCOGEM_LABEL_LEVEL=level2 \
+  DEVICE=cuda:0 bash scripts/discogem/train_test_discogem_soft_mse.sh
+```
+
+The wrapper writes predictions and evaluation to:
+
+```text
+outputs/discogem/runs/single/level2/roberta-base__classification__soft_label_loss_mse/seed_42/test/predictions.jsonl
+outputs/discogem/runs/single/level2/roberta-base__classification__soft_label_loss_mse/seed_42/test/evaluation.json
+```
+
+### Full DiscoGeM screening
+
+The screening script runs the configured encoder models across level1, level2, and level3. It evaluates classification and multilevel classification with cross-entropy, KL divergence, and MSE. It uses W&B project `discogem` by default.
+
+```bash
 DEVICE=cuda:0 bash scripts/discogem/exp_discogem_screen.sh
 ```
 
-对应入口：
+The default screening output layout is:
 
-- `scripts/snli/train_hard.sh`
-- `scripts/snli/train_soft.sh`
-- `scripts/discogem/train_discogem_hard.sh`
-- `scripts/discogem/train_discogem_soft.sh`
-- `scripts/discogem/exp_discogem_screen.sh`
+```text
+outputs/discogem/screen/<level>/<model>__<head>__<objective>/seed_42/
+```
 
-## 3. 预测
+Use `FORCE_RERUN=0` to skip completed runs and test completed runs whose evaluation file is missing. Set `WANDB_PROJECT`, `WANDB_ENTITY`, `SEED`, `DEVICE`, or `OUT_ROOT` to override defaults.
 
-训练完成后，使用最终模型生成统一 JSONL 预测：
+## 3. Prediction
+
+Generate JSONL predictions from a trained model:
 
 ```bash
 uv run python -m hlv_toolkits.scripts.predict \
@@ -264,11 +188,11 @@ uv run python -m hlv_toolkits.scripts.predict \
   --output_file outputs/snli/predictions/test.jsonl
 ```
 
-ChaosNLI 和 DiscoGeM 只需修改 `--data_source`，内置数据路径会自动使用固定目录。
+For DiscoGeM, pass the matching `--discogem_label_level` and `--discogem_label_mode` used during training.
 
-## 4. 评估和可视化
+## 4. Evaluation and visualization
 
-单标签 SNLI：
+Evaluate predictions against the matching ground truth split:
 
 ```bash
 uv run python -m hlv_toolkits.scripts.evaluate \
@@ -278,76 +202,38 @@ uv run python -m hlv_toolkits.scripts.evaluate \
   --output_file outputs/snli/results/test.json
 ```
 
-ChaosNLI 分布评估和可视化：
+For DiscoGeM, keep predictions and evaluation next to the run:
 
 ```bash
 uv run python -m hlv_toolkits.scripts.evaluate \
-  --predictions outputs/chaosnli/predictions/test.jsonl \
-  --ground_truth_source chaosnli \
+  --predictions outputs/discogem/runs/single/level2/roberta-base__classification__soft_label_loss_mse/seed_42/test/predictions.jsonl \
+  --ground_truth_source discogem \
   --ground_truth_split test \
-  --output_file outputs/chaosnli/results/test.json \
-  --plots tvd ternary \
-  --plot_dir outputs/chaosnli/figures \
-  --ternary_source both
+  --discogem_label_level level2 \
+  --discogem_label_mode soft \
+  --output_file outputs/discogem/runs/single/level2/roberta-base__classification__soft_label_loss_mse/seed_42/test/evaluation.json
 ```
 
-常用选项：
+Distributional evaluation reports accuracy, TVD, JSD, KL divergence, soft micro-F1, soft macro-F1, and distance correlation where applicable.
 
-- `--no-plot`：关闭所有图；
-- `--no-ternary_browser`：关闭交互式 ternary HTML；
-- `--predictions_format machamp`：读取 Machamp/ChaosNLI 风格预测；
-- `--ternary_source model|human|both`：选择 ternary 图数据来源。
+## 5. DiscoGeM dashboard
 
-评估指标包括：
-
-- 单标签：`accuracy`；
-- 分布标签：`accuracy`、`tvd_mean`、`jsd_mean`、`kl_mean`、`soft_micro_f1`、`soft_macro_f1`、`distance_correlation`。
-
-## 5. 数据检查和统一入口
-
-检查样例：
+Generate or refresh the dashboard notebook:
 
 ```bash
-uv run python -m hlv_toolkits.scripts.inspect_data \
-  --source snli \
-  --split test \
-  --num_examples 5
+uv run python scripts/generate_discogem_dashboard.py
 ```
 
-统一入口：
+Open [`notebooks/discogem_experiment_dashboard.ipynb`](notebooks/discogem_experiment_dashboard.ipynb) and run `Restart Kernel → Run All`. The final cell automatically exports [`notebooks/discogem_results.html`](notebooks/discogem_results.html).
 
-```bash
-uv run python main.py train ...
-uv run python main.py predict ...
-uv run python main.py evaluate ...
-uv run python main.py preprocess ...
-```
+The dashboard reads all `test/evaluation.json` files from the current `outputs/discogem` layout. It aligns single-level and multilevel results by concrete level, showing level1, level2, level3, and overall multilevel performance separately.
 
-## 预测文件格式
-
-每行一个 JSON 对象，例如：
-
-```json
-{"id":"341#1","task":"nli","split":"test","source":"snli","outputs":{"probs":[0.7,0.2,0.1],"pred":0}}
-```
-
-标签映射：
-
-```text
-0 = entailment
-1 = neutral
-2 = contradiction
-```
-
-## 项目结构
+## Project structure
 
 ```text
 hlv_toolkits/
 ├── data/
-│   ├── schemas.py
-│   └── readers/
 ├── models/
-│   └── trainer.py
 ├── eval/
 ├── visualization/
 └── scripts/
@@ -356,22 +242,26 @@ hlv_toolkits/
     ├── predict.py
     ├── evaluate.py
     ├── preprocess.py
-    ├── inspect_data.py
-    └── split_chaosnli.py
+    └── inspect_data.py
 
 scripts/
 ├── preprocess.sh
+├── generate_discogem_dashboard.py
 ├── discogem/
 │   ├── exp_discogem_screen.sh
 │   ├── train_discogem_hard.sh
-│   └── train_discogem_soft.sh
+│   ├── train_discogem_soft.sh
+│   ├── train_discogem_soft_mse.sh
+│   ├── train_test_discogem_soft_mse.sh
+│   └── test_discogem_soft_mse.sh
 └── snli/
     ├── train_hard.sh
     └── train_soft.sh
 ```
 
-更多说明：
+## Notes
 
-- `data/README.md`：数据目录约定；
-- `data/discogem.md`：DiscoGeM 2.0 label 和 processed 格式；
-- `docs/hlv_metrics_tutorial.md`：指标教程。
+- The repository uses fixed dataset locations by default.
+- Model checkpoints are written below the selected run directory, usually under `seed_<seed>/`.
+- Keep the training label level, language, head, and loss consistent between training, prediction, and evaluation.
+- W&B logging is opt-in for the generic CLI and enabled by the DiscoGeM screening wrappers.
