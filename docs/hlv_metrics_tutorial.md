@@ -85,11 +85,11 @@ cases = {
 
 for name, pred in cases.items():
     print("\n", name)
-    print("tvd_mean", compute_tvd(pred, human).mean())
-    print("jsd_mean", compute_jsd(pred, human, base=2).mean())
-    print("kl_mean", compute_kl(human, pred).mean())
-    print("ce_mean", compute_cross_entropy(human, pred).mean())
-    print("l2_mean", compute_euclidean_distance(pred, human).mean())
+    print("tvd", compute_tvd(pred, human).mean())
+    print("jsd", compute_jsd(pred, human, base=2).mean())
+    print("kl", compute_kl(human, pred).mean())
+    print("ce", compute_cross_entropy(human, pred).mean())
+    print("l2", compute_euclidean_distance(pred, human).mean())
     print("soft_micro_f1", compute_soft_micro_f1(pred, human))
     print("soft_macro_f1", compute_soft_macro_f1(pred, human))
     print("distance_correlation", compute_distance_correlation(pred, human))
@@ -97,7 +97,7 @@ for name, pred in cases.items():
 
 ## 3. Example Output (From This Repo)
 
-| Case | `tvd_mean` | `jsd_mean` | `kl_mean` | `l2_mean` | `soft_micro_f1` | `distance_correlation` |
+| Case | `tvd` | `jsd` | `kl` | `l2` | `soft_micro_f1` | `distance_correlation` |
 |---|---:|---:|---:|---:|---:|---:|
 | identical | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 1.0000 | 1.0000 |
 | small_shift | 0.0517 | 0.0574 | 0.0094 | 0.0654 | 0.9483 | 0.9989 |
@@ -155,8 +155,8 @@ print("soft_micro_f1", compute_soft_micro_f1(pred, human))   # 0.0 (min)
 ## 6. Practical Recommendation
 
 For HLV evaluation, report a small complementary set instead of one metric:
-- Pointwise mismatch: `tvd_mean` or `jsd_mean`
-- Asymmetric harshness: `kl_mean`
+- Pointwise mismatch: `tvd` or `jsd`
+- Asymmetric harshness: `kl`
 - Overlap view: `soft_micro_f1` and/or `soft_macro_f1`
 - Global structure: `distance_correlation`
 

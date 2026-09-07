@@ -30,9 +30,11 @@ from transformers.utils import ModelOutput
 
 from hlv_toolkits.data.schemas import (
     DISCOGEM_LEVEL_ORDER,
-    DiscoGeMMultiLevelSample,
-    NLIDistributionSample,
-    NLISample,
+    MultilevelSample,
+    TextPairClassificationSample,
+    TextPairDistributionSample,
+    SingleTextClassificationSample,
+    SingleTextDistributionSample,
     NLI_NUM_LABELS,
     get_discogem_level_num_labels,
 )
@@ -160,11 +162,12 @@ def _strip_label_inputs(kwargs):
 
 @dataclass
 class TrainingConfig:
-    """Configuration for NLI model training."""
+    """Configuration for HLV model training."""
 
     # Model configuration
     model_name_or_path: str = "roberta-base"  # or "bert-base-uncased"
     num_labels: int = NLI_NUM_LABELS
+    label_names: Optional[List[str]] = None
 
     # Training hyperparameters
     learning_rate: float = 2e-5
@@ -176,19 +179,20 @@ class TrainingConfig:
     gradient_accumulation_steps: int = 1
 
     # Head and objective settings
-    head_type: str = "classification"  # choices: classification, joint_classification, multilevel_classification, multilevel_regression
+    head_type: str = "classification"  # choices: classification, multilevel_classification
 
     # Soft-label training settings
     use_soft_labels: bool = False
-    soft_label_loss: str = "cross_entropy"  # choices: cross_entropy, kl_div
+    soft_label_loss: str = "ce"  # choices: ce, mse, jsd, rel
     soft_label_metric_for_best_model: str = "tvd"  # choices: kl_divergence, tvd, accuracy
-    joint_loss_lambda: float = 0.5
     multilevel_label_sizes: Optional[Tuple[int, int, int]] = None
 
     # Data paths
     output_dir: str = "./outputs"
+    resume_from_checkpoint: Optional[str] = None
     save_strategy: str = "epoch"
     eval_strategy: str = "epoch"
+    has_eval: bool = True
     save_total_limit: int = 3
 
     # Tokenization settings
@@ -209,22 +213,15 @@ class TrainingConfig:
     wandb_run_name: Optional[str] = None
 
     def to_training_args(self) -> TrainingArguments:
-        valid_head_types = {
-            "classification",
-            "joint_classification",
-            "multilevel_classification",
-            "multilevel_regression",
-        }
+        valid_head_types = {"classification", "multilevel_classification"}
         if self.head_type not in valid_head_types:
             raise ValueError(
-                "head_type must be one of: classification, joint_classification, "
-                "multilevel_classification, multilevel_regression"
+                "head_type must be one of: classification, multilevel_classification"
             )
-        if self.soft_label_loss not in {"cross_entropy", "kl_div", "mse"}:
-            raise ValueError("soft_label_loss must be one of: cross_entropy, kl_div, mse")
-        if not 0.0 <= self.joint_loss_lambda <= 1.0:
-            raise ValueError("joint_loss_lambda must be in [0, 1]")
-
+        if self.soft_label_loss not in {"ce", "mse", "jsd", "rel"}:
+            raise ValueError("label_training_strategy must be one of: ce, mse, jsd, rel")
+        if self.label_names is not None and len(self.label_names) != self.num_labels:
+            raise ValueError("label_names must have exactly num_labels entries")
         report_to = []
         if self.use_wandb:
             try:
@@ -249,15 +246,14 @@ class TrainingConfig:
 
         metric_for_best_model = "accuracy"
         greater_is_better = True
-        if self.use_soft_labels or self.head_type == "joint_classification":
+        if self.use_soft_labels:
             metric_for_best_model = self.soft_label_metric_for_best_model
             greater_is_better = metric_for_best_model == "accuracy"
 
         label_names = ["labels"]
-        if self.head_type == "joint_classification":
-            label_names = ["hard_labels", "soft_labels"]
-        elif self.head_type in {"multilevel_classification", "multilevel_regression"}:
-            prefix = "soft_labels" if self.use_soft_labels else "hard_labels"
+        if self.head_type == "multilevel_classification":
+            rel_training = self.use_soft_labels and self.soft_label_loss == "rel"
+            prefix = "hard_labels" if rel_training or not self.use_soft_labels else "soft_labels"
             label_names = [f"{prefix}_{level}" for level in MULTILEVEL_LEVEL_ORDER]
 
         return TrainingArguments(
@@ -269,7 +265,7 @@ class TrainingConfig:
             warmup_ratio=self.warmup_ratio,
             weight_decay=self.weight_decay,
             gradient_accumulation_steps=self.gradient_accumulation_steps,
-            eval_strategy=self.eval_strategy,
+            eval_strategy=self.eval_strategy if self.has_eval else "no",
             save_strategy=self.save_strategy,
             save_total_limit=self.save_total_limit,
             seed=self.seed,
@@ -277,7 +273,7 @@ class TrainingConfig:
             use_cpu=self.device == "cpu",
             dataloader_num_workers=self.dataloader_num_workers,
             dataloader_pin_memory=self.device != "cpu",
-            load_best_model_at_end=True,
+            load_best_model_at_end=self.has_eval,
             metric_for_best_model=metric_for_best_model,
             greater_is_better=greater_is_better,
             logging_steps=100,
@@ -285,13 +281,6 @@ class TrainingConfig:
             report_to=report_to,
             label_names=label_names,
         )
-
-
-@dataclass
-class JointSequenceClassifierOutput(ModelOutput):
-    logits: Tuple[torch.FloatTensor, torch.FloatTensor]
-    hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
-    attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
 
 
 @dataclass
@@ -362,63 +351,6 @@ class MultiLevelClassificationModel(nn.Module):
         )
 
 
-class MultiLevelRegressionModel(nn.Module):
-    """Backbone + one regression head spanning all DiscoGeM levels."""
-
-    META_FILENAME = "multilevel_regression_meta.json"
-
-    def __init__(self, backbone: nn.Module, hidden_size: int, level_num_labels: Optional[dict[str, int]] = None) -> None:
-        super().__init__()
-        self.backbone = backbone
-        self.dropout = nn.Dropout(0.1)
-        self.level_num_labels = level_num_labels or dict(MULTILEVEL_LEVEL_SIZES)
-        self.output_dim = sum(self.level_num_labels[level] for level in MULTILEVEL_LEVEL_ORDER)
-        self.regression_head = nn.Linear(hidden_size, self.output_dim)
-
-    @classmethod
-    def from_pretrained(
-        cls,
-        model_name_or_path: str,
-        level_num_labels: Optional[dict[str, int]] = None,
-    ) -> "MultiLevelRegressionModel":
-        config = AutoConfig.from_pretrained(model_name_or_path)
-        backbone = AutoModel.from_pretrained(model_name_or_path, config=config)
-        hidden_size = int(config.hidden_size)
-        model = cls(backbone=backbone, hidden_size=hidden_size, level_num_labels=level_num_labels)
-
-        meta_path = Path(model_name_or_path) / cls.META_FILENAME
-        state_path = Path(model_name_or_path) / "multilevel_regression_heads.pt"
-        if meta_path.exists() and state_path.exists():
-            model.load_state_dict(torch.load(state_path, map_location="cpu"))
-        return model
-
-    def save_pretrained(self, save_dir: Union[str, Path]) -> None:
-        save_path = Path(save_dir)
-        save_path.mkdir(parents=True, exist_ok=True)
-        self.backbone.save_pretrained(save_path)
-        torch.save(self.state_dict(), save_path / "multilevel_regression_heads.pt")
-        with open(save_path / self.META_FILENAME, "w", encoding="utf-8") as f:
-            json.dump({"head_type": "multilevel_regression", "level_num_labels": self.level_num_labels}, f)
-
-    def forward(self, input_ids=None, attention_mask=None, token_type_ids=None, **kwargs):
-        backbone_kwargs = {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            **_strip_label_inputs(kwargs),
-        }
-        if token_type_ids is not None and "token_type_ids" in inspect.signature(self.backbone.forward).parameters:
-            backbone_kwargs["token_type_ids"] = token_type_ids
-        outputs = self.backbone(**backbone_kwargs)
-        pooled = outputs.pooler_output if getattr(outputs, "pooler_output", None) is not None else outputs.last_hidden_state[:, 0]
-        pooled = self.dropout(pooled)
-        logits = self.regression_head(pooled)
-        return SequenceClassifierOutput(
-            logits=logits,
-            hidden_states=getattr(outputs, "hidden_states", None),
-            attentions=getattr(outputs, "attentions", None),
-        )
-
-
 class ThroughputLoggingCallback(TrainerCallback):
     def __init__(self, train_batch_size: int, gradient_accumulation_steps: int) -> None:
         self.examples_per_step = max(1, train_batch_size) * max(1, gradient_accumulation_steps)
@@ -454,85 +386,21 @@ class ThroughputLoggingCallback(TrainerCallback):
         self.last_epoch_step = current_step
 
 
-class JointClassificationModel(nn.Module):
-    """Backbone + separate hard and soft classification heads."""
-
-    META_FILENAME = "joint_classification_meta.json"
-
-    def __init__(self, backbone: nn.Module, hidden_size: int, num_labels: int) -> None:
-        super().__init__()
-        self.backbone = backbone
-        self.dropout = nn.Dropout(0.1)
-        self.hard_classifier = nn.Linear(hidden_size, num_labels)
-        self.soft_classifier = nn.Linear(hidden_size, num_labels)
-        self.num_labels = num_labels
-
-    @classmethod
-    def from_pretrained(cls, model_name_or_path: str, num_labels: int) -> "JointClassificationModel":
-        config = AutoConfig.from_pretrained(model_name_or_path)
-        backbone = AutoModel.from_pretrained(model_name_or_path, config=config)
-        hidden_size = int(config.hidden_size)
-        model = cls(backbone=backbone, hidden_size=hidden_size, num_labels=num_labels)
-
-        meta_path = Path(model_name_or_path) / cls.META_FILENAME
-        state_path = Path(model_name_or_path) / "joint_classification_heads.pt"
-        if meta_path.exists() and state_path.exists():
-            model.load_state_dict(torch.load(state_path, map_location="cpu"))
-        return model
-
-    def save_pretrained(self, save_dir: Union[str, Path]) -> None:
-        save_path = Path(save_dir)
-        save_path.mkdir(parents=True, exist_ok=True)
-        self.backbone.save_pretrained(save_path)
-        torch.save(self.state_dict(), save_path / "joint_classification_heads.pt")
-        with open(save_path / self.META_FILENAME, "w", encoding="utf-8") as f:
-            json.dump({"head_type": "joint_classification", "num_labels": self.num_labels}, f)
-
-    def forward(
-        self,
-        input_ids=None,
-        attention_mask=None,
-        token_type_ids=None,
-        hard_labels=None,
-        soft_labels=None,
-        **kwargs,
-    ):
-        backbone_kwargs = {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            **_strip_label_inputs(kwargs),
-        }
-        if token_type_ids is not None and "token_type_ids" in inspect.signature(self.backbone.forward).parameters:
-            backbone_kwargs["token_type_ids"] = token_type_ids
-        outputs = self.backbone(**backbone_kwargs)
-        pooled = outputs.pooler_output if getattr(outputs, "pooler_output", None) is not None else outputs.last_hidden_state[:, 0]
-        pooled = self.dropout(pooled)
-        hard_logits = self.hard_classifier(pooled)
-        soft_logits = self.soft_classifier(pooled)
-        return JointSequenceClassifierOutput(
-            logits=(hard_logits, soft_logits),
-            hidden_states=getattr(outputs, "hidden_states", None),
-            attentions=getattr(outputs, "attentions", None),
-        )
-
-
 class SoftLabelTrainer(Trainer):
-    """HuggingFace Trainer that supports classification, joint classification and per-label regression."""
+    """HuggingFace Trainer for classification and multilevel classification."""
 
     def __init__(
         self,
         *args,
         use_soft_labels: bool = False,
-        soft_label_loss: str = "cross_entropy",
+        soft_label_loss: str = "ce",
         head_type: str = "classification",
-        joint_loss_lambda: float = 0.5,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self.use_soft_labels = use_soft_labels
         self.soft_label_loss = soft_label_loss
         self.head_type = head_type
-        self.joint_loss_lambda = joint_loss_lambda
 
     def _compute_soft_loss(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
         labels = labels.to(logits.dtype)
@@ -542,8 +410,13 @@ class SoftLabelTrainer(Trainer):
             return F.mse_loss(predictions, labels)
 
         log_probs = F.log_softmax(logits, dim=-1)
-        if self.soft_label_loss == "kl_div":
-            return F.kl_div(log_probs, labels, reduction="batchmean")
+        if self.soft_label_loss == "jsd":
+            predictions = log_probs.exp()
+            mixture = 0.5 * (predictions + labels)
+            log_mixture = mixture.clamp(min=1e-8).log()
+            kl_labels = (labels * (labels.clamp(min=1e-8).log() - log_mixture)).sum(dim=-1)
+            kl_predictions = (predictions * (log_probs - log_mixture)).sum(dim=-1)
+            return 0.5 * (kl_labels + kl_predictions).mean()
         return -(labels * log_probs).sum(dim=-1).mean()
 
     def _labels_for_level(self, inputs, level: str, prefix: str) -> torch.Tensor:
@@ -560,54 +433,39 @@ class SoftLabelTrainer(Trainer):
         raise TypeError(f"Unsupported multilevel logits type: {type(logits)!r}")
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
-        outputs = model(**inputs)
+        # Hugging Face sequence-classification models interpret ``labels`` as
+        # hard class indices. Distributional soft labels have shape
+        # ``[batch_size, num_labels]``; passing them through would make the
+        # base model flatten them while computing its own loss (e.g. 17 -> 51
+        # for three NLI labels). This trainer owns every loss calculation, so
+        # never forward any of its label columns to the model.
+        outputs = model(**_strip_label_inputs(inputs))
         logits = outputs.logits
 
-        if self.head_type == "joint_classification":
-            hard_labels = inputs["hard_labels"]
-            soft_labels = inputs["soft_labels"]
-            hard_logits, soft_logits = logits
-            ce_hard = F.cross_entropy(hard_logits, hard_labels.long())
-            kl_soft = self._compute_soft_loss(soft_logits, soft_labels)
-            lam = self.joint_loss_lambda
-            loss = lam * ce_hard + (1.0 - lam) * kl_soft
-        elif self.head_type == "multilevel_classification":
-            prefix = "soft_labels" if self.use_soft_labels else "hard_labels"
+        if self.head_type == "multilevel_classification":
+            rel_training = self.use_soft_labels and self.soft_label_loss == "rel"
+            prefix = "hard_labels" if rel_training or not self.use_soft_labels else "soft_labels"
             level_logits = self._level_logits_from_output(logits)
             losses = []
             for level in MULTILEVEL_LEVEL_ORDER:
                 level_logits_t = level_logits[level]
                 level_labels = self._labels_for_level(inputs, level, prefix)
-                if self.use_soft_labels:
+                if self.use_soft_labels and not rel_training:
                     losses.append(self._compute_soft_loss(level_logits_t, level_labels))
                 else:
                     losses.append(F.cross_entropy(level_logits_t, level_labels.long()))
             loss = sum(losses)
-        elif self.head_type == "multilevel_regression":
-            prefix = "soft_labels" if self.use_soft_labels else "hard_labels"
-            losses = []
-            for level in MULTILEVEL_LEVEL_ORDER:
-                start, end = MULTILEVEL_LEVEL_SPANS[level]
-                pred = torch.sigmoid(logits[:, start:end])
-                level_labels = self._labels_for_level(inputs, level, prefix)
-                if self.use_soft_labels:
-                    level_labels = level_labels.to(pred.dtype)
-                    level_labels = level_labels / level_labels.sum(dim=-1, keepdim=True).clamp(min=1e-8)
-                else:
-                    level_labels = F.one_hot(level_labels.long(), num_classes=end - start).to(pred.dtype)
-                losses.append(F.mse_loss(pred, level_labels))
-            loss = sum(losses)
         else:
             labels = inputs["labels"]
             if self.use_soft_labels:
-                loss = self._compute_soft_loss(logits, labels)
+                loss = F.cross_entropy(logits, labels.long()) if self.soft_label_loss == "rel" and labels.ndim == 1 else self._compute_soft_loss(logits, labels)
             else:
                 loss = F.cross_entropy(logits, labels.long())
 
         return (loss, outputs) if return_outputs else loss
 
 
-class NLITrainer:
+class HLVTrainer:
     def __init__(self, config: TrainingConfig) -> None:
         self.config = config
         self.tokenizer = None
@@ -618,9 +476,7 @@ class NLITrainer:
         print(f"Loading tokenizer and model: {model_name}")
         self.tokenizer = load_tokenizer_with_fallback(model_name)
 
-        if self.config.head_type == "joint_classification":
-            self.model = JointClassificationModel.from_pretrained(model_name, num_labels=self.config.num_labels)
-        elif self.config.head_type == "multilevel_classification":
+        if self.config.head_type == "multilevel_classification":
             level_sizes = self.config.multilevel_label_sizes or tuple(
                 MULTILEVEL_LEVEL_SIZES[level] for level in MULTILEVEL_LEVEL_ORDER
             )
@@ -628,28 +484,25 @@ class NLITrainer:
                 model_name,
                 level_num_labels={level: size for level, size in zip(MULTILEVEL_LEVEL_ORDER, level_sizes)},
             )
-        elif self.config.head_type == "multilevel_regression":
-            level_sizes = self.config.multilevel_label_sizes or tuple(
-                MULTILEVEL_LEVEL_SIZES[level] for level in MULTILEVEL_LEVEL_ORDER
-            )
-            self.model = MultiLevelRegressionModel.from_pretrained(
-                model_name,
-                level_num_labels={level: size for level, size in zip(MULTILEVEL_LEVEL_ORDER, level_sizes)},
-            )
         else:
-            self.model = AutoModelForSequenceClassification.from_pretrained(
-                model_name,
-                num_labels=self.config.num_labels,
-            )
+            model_kwargs = {"num_labels": self.config.num_labels}
+            if self.config.label_names is not None:
+                model_kwargs["id2label"] = {i: label for i, label in enumerate(self.config.label_names)}
+                model_kwargs["label2id"] = {label: i for i, label in enumerate(self.config.label_names)}
+            self.model = AutoModelForSequenceClassification.from_pretrained(model_name, **model_kwargs)
 
     def prepare_dataset(
         self,
-        train_samples: List[Union[NLISample, NLIDistributionSample, DiscoGeMMultiLevelSample]],
-        eval_samples: Optional[List[Union[NLISample, NLIDistributionSample, DiscoGeMMultiLevelSample]]] = None,
+        train_samples: List[Union[TextPairClassificationSample, TextPairDistributionSample, SingleTextClassificationSample, SingleTextDistributionSample, MultilevelSample]],
+        eval_samples: Optional[List[Union[TextPairClassificationSample, TextPairDistributionSample, SingleTextClassificationSample, SingleTextDistributionSample, MultilevelSample]]] = None,
     ) -> Tuple[Dataset, Optional[Dataset]]:
         if self.tokenizer is None:
             raise ValueError("Must call initialize_model() first")
         model_config = getattr(self.model, "config", None)
+        if not self.config.use_soft_labels and self.config.soft_label_loss != "ce":
+            raise ValueError("Hard or soft_to_hard data only supports label_training_strategy='ce'.")
+        if self.config.soft_label_loss == "rel" and not self.config.use_soft_labels:
+            raise ValueError("ReL requires soft data with multiple annotation_labels per example.")
         effective_max_length = resolve_max_length(self.tokenizer, model_config, self.config.max_length)
 
         def tokenize_function(examples: dict) -> dict:
@@ -660,16 +513,16 @@ class NLITrainer:
             }
 
             return self.tokenizer(
-                examples["premise"],
-                examples["hypothesis"],
+                examples["text_a"],
+                examples["text_b"],
                 **tokenizer_kwargs,
             )
 
-        def extract_soft_labels(samples: List[Union[NLISample, NLIDistributionSample]]) -> List[List[float]]:
+        def extract_soft_labels(samples: List[Union[TextPairClassificationSample, TextPairDistributionSample]]) -> List[List[float]]:
             labels: List[List[float]] = []
             for s in samples:
-                if not isinstance(s, NLIDistributionSample) or not s.human_dist:
-                    raise ValueError("Soft-label training requires NLIDistributionSample with non-empty human_dist.")
+                if not isinstance(s, (TextPairDistributionSample, SingleTextDistributionSample)) or not s.human_dist:
+                    raise ValueError("Soft-label training requires samples with a non-empty human_dist.")
                 if len(s.human_dist) != self.config.num_labels:
                     raise ValueError(
                         f"Expected human_dist length {self.config.num_labels}, got {len(s.human_dist)} for sample {s.id}."
@@ -677,7 +530,7 @@ class NLITrainer:
                 labels.append([float(x) for x in s.human_dist])
             return labels
 
-        def extract_multilevel_labels(samples: List[DiscoGeMMultiLevelSample], use_soft: bool) -> dict[str, List]:
+        def extract_multilevel_labels(samples: List[MultilevelSample], use_soft: bool) -> dict[str, List]:
             label_columns: dict[str, List] = {}
             prefix = "soft_labels" if use_soft else "hard_labels"
             for level in MULTILEVEL_LEVEL_ORDER:
@@ -688,7 +541,7 @@ class NLITrainer:
                         dist = sample.human_dists.get(level)
                         if not dist:
                             raise ValueError(f"Missing {level} human_dist for sample {sample.id}.")
-                        expected = MULTILEVEL_LEVEL_SIZES[level]
+                        expected = self.config.multilevel_label_sizes[MULTILEVEL_LEVEL_ORDER.index(level)] if self.config.multilevel_label_sizes else MULTILEVEL_LEVEL_SIZES[level]
                         if len(dist) != expected:
                             raise ValueError(
                                 f"Expected {level} human_dist length {expected}, got {len(dist)} for sample {sample.id}."
@@ -701,29 +554,78 @@ class NLITrainer:
                 label_columns[key] = values
             return label_columns
 
-        def extract_labels(samples: List[Union[NLISample, NLIDistributionSample]]) -> List[Union[int, List[float]]]:
+        def extract_labels(samples: List[Union[TextPairClassificationSample, TextPairDistributionSample]]) -> List[Union[int, List[float]]]:
             if not self.config.use_soft_labels:
                 return [s.label for s in samples]
 
             return extract_soft_labels(samples)
 
-        def build_dataset(samples: List[Union[NLISample, NLIDistributionSample, DiscoGeMMultiLevelSample]]) -> Dataset:
+        def build_dataset(samples: List[Union[TextPairClassificationSample, TextPairDistributionSample, SingleTextClassificationSample, SingleTextDistributionSample, MultilevelSample]]) -> Dataset:
             data = {
-                "premise": [s.premise for s in samples],
-                "hypothesis": [s.hypothesis for s in samples],
+                "text_a": [s.text_a if isinstance(s, TextPairClassificationSample) else s.text if isinstance(s, SingleTextClassificationSample) else s.premise for s in samples],
+                "text_b": [s.text_b if isinstance(s, TextPairClassificationSample) else "" if isinstance(s, SingleTextClassificationSample) else s.hypothesis for s in samples],
             }
-            if self.config.head_type == "joint_classification":
-                data["hard_labels"] = [int(s.label) for s in samples]
-                data["soft_labels"] = extract_soft_labels(samples)
-            elif self.config.head_type in {"multilevel_classification", "multilevel_regression"}:
-                if not samples or not isinstance(samples[0], DiscoGeMMultiLevelSample):
-                    raise ValueError("Multilevel DiscoGeM heads require DiscoGeMMultiLevelSample inputs.")
-                data.update(extract_multilevel_labels([s for s in samples if isinstance(s, DiscoGeMMultiLevelSample)], self.config.use_soft_labels))
+            if self.config.head_type == "multilevel_classification":
+                if not samples or not isinstance(samples[0], MultilevelSample):
+                    raise ValueError("Multilevel heads require MultilevelSample inputs.")
+                data.update(extract_multilevel_labels([s for s in samples if isinstance(s, MultilevelSample)], self.config.use_soft_labels))
             else:
                 data["labels"] = extract_labels(samples)  # type: ignore[arg-type]
             return Dataset.from_dict(data).map(tokenize_function, batched=True)
 
-        train_dataset = build_dataset(train_samples)
+        def build_rel_dataset(samples: List[Union[TextPairClassificationSample, TextPairDistributionSample]]) -> Dataset:
+            text_a: List[str] = []
+            text_b: List[str] = []
+            labels: List[int] = []
+            for sample in samples:
+                if not isinstance(sample, (TextPairDistributionSample, SingleTextDistributionSample)) or not sample.annotation_labels:
+                    raise ValueError("ReL requires soft text-pair samples with non-empty annotation_labels.")
+                for label in sample.annotation_labels:
+                    text_a.append(sample.text_a if isinstance(sample, TextPairDistributionSample) else sample.text)
+                    text_b.append(sample.text_b if isinstance(sample, TextPairDistributionSample) else "")
+                    labels.append(int(label))
+            if not labels:
+                raise ValueError("ReL requires at least one annotation label.")
+            return Dataset.from_dict({"text_a": text_a, "text_b": text_b, "labels": labels}).map(
+                tokenize_function, batched=True
+            )
+
+        def build_multilevel_rel_dataset(samples: List[MultilevelSample]) -> Dataset:
+            text_a: List[str] = []
+            text_b: List[str] = []
+            label_columns = {f"hard_labels_{level}": [] for level in MULTILEVEL_LEVEL_ORDER}
+            for sample in samples:
+                votes = sample.meta.get("annotation_votes")
+                if not isinstance(votes, dict):
+                    raise ValueError(f"ReL requires annotation_votes for multilevel sample {sample.id}.")
+                level_votes = []
+                for level in MULTILEVEL_LEVEL_ORDER:
+                    labels = votes.get(level)
+                    if not isinstance(labels, list) or not labels:
+                        raise ValueError(f"ReL requires non-empty {level} annotation_votes for multilevel sample {sample.id}.")
+                    level_votes.append(labels)
+                vote_count = len(level_votes[0])
+                if any(len(labels) != vote_count for labels in level_votes[1:]):
+                    raise ValueError(f"Multilevel annotation_votes must have the same count at every level for sample {sample.id}.")
+                for vote_index in range(vote_count):
+                    text_a.append(sample.premise)
+                    text_b.append(sample.hypothesis)
+                    for level, labels in zip(MULTILEVEL_LEVEL_ORDER, level_votes):
+                        label_columns[f"hard_labels_{level}"].append(int(labels[vote_index]))
+            if not text_a:
+                raise ValueError("ReL requires at least one multilevel annotation vote.")
+            return Dataset.from_dict({"text_a": text_a, "text_b": text_b, **label_columns}).map(
+                tokenize_function, batched=True
+            )
+
+        if self.config.soft_label_loss == "rel":
+            train_dataset = (
+                build_multilevel_rel_dataset([sample for sample in train_samples if isinstance(sample, MultilevelSample)])
+                if self.config.head_type == "multilevel_classification"
+                else build_rel_dataset(train_samples)
+            )
+        else:
+            train_dataset = build_dataset(train_samples)
 
         eval_dataset = None
         if eval_samples:
@@ -733,8 +635,8 @@ class NLITrainer:
 
     def train(
         self,
-        train_samples: List[Union[NLISample, NLIDistributionSample, DiscoGeMMultiLevelSample]],
-        eval_samples: Optional[List[Union[NLISample, NLIDistributionSample, DiscoGeMMultiLevelSample]]] = None,
+        train_samples: List[Union[TextPairClassificationSample, TextPairDistributionSample, SingleTextClassificationSample, SingleTextDistributionSample, MultilevelSample]],
+        eval_samples: Optional[List[Union[TextPairClassificationSample, TextPairDistributionSample, SingleTextClassificationSample, SingleTextDistributionSample, MultilevelSample]]] = None,
     ) -> None:
         if self.model is None or self.tokenizer is None:
             self.initialize_model()
@@ -747,15 +649,6 @@ class NLITrainer:
                     level: torch.softmax(torch.tensor(predictions[idx]), dim=-1).cpu().numpy()
                     for idx, level in enumerate(MULTILEVEL_LEVEL_ORDER)
                 }
-            elif self.config.head_type == "multilevel_regression":
-                pred_tensor = torch.sigmoid(torch.tensor(predictions))
-                level_probs = {}
-                for level in MULTILEVEL_LEVEL_ORDER:
-                    start, end = MULTILEVEL_LEVEL_SPANS[level]
-                    level_scores = pred_tensor[:, start:end]
-                    level_probs[level] = (
-                        level_scores / level_scores.sum(dim=-1, keepdim=True).clamp(min=1e-8)
-                    ).cpu().numpy()
             else:
                 raise ValueError(f"Unsupported multilevel head type: {self.config.head_type}")
             level_labels = {level: np.asarray(labels[idx]) for idx, level in enumerate(MULTILEVEL_LEVEL_ORDER)}
@@ -801,27 +694,7 @@ class NLITrainer:
             predictions = eval_pred.predictions
             labels = eval_pred.label_ids
 
-            if self.config.head_type == "joint_classification":
-                hard_logits, soft_logits = predictions
-                hard_labels, soft_labels = labels
-                pred_probs = torch.softmax(torch.tensor(soft_logits), dim=-1).cpu().numpy()
-                hard_pred_labels = np.asarray(hard_logits).argmax(axis=-1)
-                soft_labels = np.asarray(soft_labels, dtype=np.float32)
-                soft_labels = soft_labels / np.clip(soft_labels.sum(axis=-1, keepdims=True), a_min=1e-8, a_max=None)
-
-                accuracy = float((hard_pred_labels == np.asarray(hard_labels)).mean())
-                soft_accuracy = float((pred_probs.argmax(axis=-1) == soft_labels.argmax(axis=-1)).mean())
-                eps = 1e-8
-                kl_div = float(np.mean(np.sum(soft_labels * (np.log(soft_labels + eps) - np.log(pred_probs + eps)), axis=-1)))
-                tvd = float(np.mean(0.5 * np.sum(np.abs(pred_probs - soft_labels), axis=-1)))
-                return {
-                    "accuracy": accuracy,
-                    "soft_accuracy": soft_accuracy,
-                    "kl_divergence": kl_div,
-                    "tvd": tvd,
-                }
-
-            if self.config.head_type in {"multilevel_classification", "multilevel_regression"}:
+            if self.config.head_type == "multilevel_classification":
                 level_probs, level_labels = _prepare_multilevel_predictions(predictions, labels)
                 return _metrics_from_level_probs(level_probs, level_labels)
 
@@ -862,12 +735,12 @@ class NLITrainer:
             use_soft_labels=self.config.use_soft_labels,
             soft_label_loss=self.config.soft_label_loss,
             head_type=self.config.head_type,
-            joint_loss_lambda=self.config.joint_loss_lambda,
         )
 
         print("Starting training...")
-        trainer.train()
-        _print_dev_metric_plot(trainer, self.config.soft_label_metric_for_best_model)
+        trainer.train(resume_from_checkpoint=self.config.resume_from_checkpoint)
+        if eval_dataset is not None:
+            _print_dev_metric_plot(trainer, self.config.soft_label_metric_for_best_model)
 
         output_path = Path(self.config.output_dir) / "final_model"
         output_path.mkdir(parents=True, exist_ok=True)
@@ -890,8 +763,6 @@ class NLITrainer:
         self.tokenizer = load_tokenizer_with_fallback(model_dir)
 
         multilevel_class_meta = model_dir / MultiLevelClassificationModel.META_FILENAME
-        multilevel_reg_meta = model_dir / MultiLevelRegressionModel.META_FILENAME
-        joint_meta_path = model_dir / JointClassificationModel.META_FILENAME
         if multilevel_class_meta.exists():
             with open(multilevel_class_meta, "r", encoding="utf-8") as f:
                 meta = json.load(f)
@@ -901,23 +772,6 @@ class NLITrainer:
             self.model = MultiLevelClassificationModel.from_pretrained(
                 str(model_dir),
                 level_num_labels={level: int(level_num_labels[level]) for level in MULTILEVEL_LEVEL_ORDER},
-            )
-        elif multilevel_reg_meta.exists():
-            with open(multilevel_reg_meta, "r", encoding="utf-8") as f:
-                meta = json.load(f)
-            level_num_labels = meta.get("level_num_labels") or {
-                level: MULTILEVEL_LEVEL_SIZES[level] for level in MULTILEVEL_LEVEL_ORDER
-            }
-            self.model = MultiLevelRegressionModel.from_pretrained(
-                str(model_dir),
-                level_num_labels={level: int(level_num_labels[level]) for level in MULTILEVEL_LEVEL_ORDER},
-            )
-        elif joint_meta_path.exists():
-            with open(joint_meta_path, "r", encoding="utf-8") as f:
-                meta = json.load(f)
-            self.model = JointClassificationModel.from_pretrained(
-                str(model_dir),
-                num_labels=int(meta.get("num_labels", NLI_NUM_LABELS)),
             )
         else:
             self.model = AutoModelForSequenceClassification.from_pretrained(model_dir)

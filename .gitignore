@@ -13,7 +13,6 @@ __pycache__/
 
 # Testing & tooling
 .pytest_cache/
-uv.lock
 
 # Build metadata
 *.egg-info/
@@ -21,3 +20,11 @@ uv.lock
 # Experiment outputs
 outputs/
 wandb/
+# NFS temporary files
+.nfs*
+
+# Local reference material
+/machamp.pdf
+
+# External local checkout; use a Git submodule if it needs to be shared.
+/externel/

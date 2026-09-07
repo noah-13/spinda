@@ -8,16 +8,19 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 
 from hlv_toolkits.data.schemas import (
-    NLIDistributionSample,
-    NLISample,
+    SingleTextDistributionSample,
+    TextPairClassificationSample,
+    TextPairDistributionSample,
     NLI_NUM_LABELS,
     PredictionRecord,
 )
 from hlv_toolkits.eval.metrics import (
     compute_tvd,
     compute_distance_correlation,
+    compute_euclidean_distance,
     compute_jsd,
     compute_kl,
+    compute_cross_entropy,
     compute_soft_macro_f1,
     compute_soft_micro_f1,
 )
@@ -45,7 +48,7 @@ class Evaluator:
     def prepare_distribution_arrays(
         self,
         predictions: List[PredictionRecord],
-        ground_truth: List[NLIDistributionSample],
+        ground_truth: List[Union[TextPairDistributionSample]],
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
         Align predictions and distribution ground truth by ID and return arrays.
@@ -96,7 +99,7 @@ class Evaluator:
     def evaluate_single_label(
         self,
         predictions: List[PredictionRecord],
-        ground_truth: List[NLISample],
+        ground_truth: List[Union[TextPairClassificationSample]],
     ) -> EvaluationArtifacts:
         # Match predictions to ground truth by ID
         gt_dict = {gt.id: gt for gt in ground_truth}
@@ -112,7 +115,9 @@ class Evaluator:
             pred_label = pred.outputs.get("pred", -1)
             probs = pred.outputs.get("probs", [])
 
-            if pred_label < 0 or len(probs) != NLI_NUM_LABELS:
+            if pred_label < 0 or not isinstance(probs, list) or len(probs) == 0:
+                continue
+            if pred_label >= len(probs) or gt.label < 0 or gt.label >= len(probs):
                 continue
 
             pred_labels.append(pred_label)
@@ -140,7 +145,7 @@ class Evaluator:
     def evaluate_with_distribution(
         self,
         predictions: List[PredictionRecord],
-        ground_truth: List[NLIDistributionSample],
+        ground_truth: List[Union[TextPairDistributionSample]],
     ) -> EvaluationArtifacts:
         pred_probs, human_probs, pred_labels, true_labels = self.prepare_distribution_arrays(
             predictions,
@@ -156,16 +161,21 @@ class Evaluator:
         soft_micro_f1 = compute_soft_micro_f1(pred_probs, human_probs)
         soft_macro_f1 = compute_soft_macro_f1(pred_probs, human_probs)
         distance_correlation = compute_distance_correlation(pred_probs, human_probs)
+        euclidean_distance = compute_euclidean_distance(pred_probs, human_probs)
+        cross_entropy = compute_cross_entropy(human_probs, pred_probs)
 
         return EvaluationArtifacts(
             metrics={
                 "accuracy": float(accuracy),
-                "tvd_mean": float(np.mean(tvd)),
-                "jsd_mean": float(np.mean(jsd)),
-                "kl_mean": float(np.mean(kl)),
+                "tvd": float(np.mean(tvd)),
+                "jsd": float(np.mean(jsd)),
+                "kl": float(np.mean(kl)),
                 "soft_micro_f1": float(soft_micro_f1),
                 "soft_macro_f1": float(soft_macro_f1),
                 "distance_correlation": float(distance_correlation),
+                # Keep result keys aligned with notebooks/metrics_tutorial.ipynb.
+                "l2": float(np.mean(euclidean_distance)),
+                "ce": float(np.mean(cross_entropy)),
             },
             pred_probs=pred_probs,
             human_probs=human_probs,
@@ -176,18 +186,18 @@ class Evaluator:
     def evaluate(
         self,
         predictions: List[PredictionRecord],
-        ground_truth: List[Union[NLISample, NLIDistributionSample]],
+        ground_truth: List[Union[TextPairClassificationSample, TextPairDistributionSample]],
     ) -> EvaluationArtifacts:
         if len(ground_truth) == 0:
             return EvaluationArtifacts(metrics={})
 
-        if isinstance(ground_truth[0], NLIDistributionSample):
+        if isinstance(ground_truth[0], (TextPairDistributionSample, SingleTextDistributionSample)):
             return self.evaluate_with_distribution(
                 predictions,
-                [gt for gt in ground_truth if isinstance(gt, NLIDistributionSample)],
+                [gt for gt in ground_truth if isinstance(gt, (TextPairDistributionSample, SingleTextDistributionSample))],
             )
 
         return self.evaluate_single_label(
             predictions,
-            [gt for gt in ground_truth if isinstance(gt, NLISample)],
+            [gt for gt in ground_truth if isinstance(gt, (TextPairClassificationSample, TextPairDistributionSample, SingleTextDistributionSample))],
         )

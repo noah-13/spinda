@@ -15,15 +15,12 @@ from typing import Any, Dict, List
 
 import torch
 
-from hlv_toolkits.data import ChaosNLIReader, DiscoGeMReader, ProcessedJSONLReader, SNLIReader
+from hlv_toolkits.data import SingleTextClassificationJSONLReader, TextPairClassificationJSONLReader, TextPairMultilevelJSONLReader
 from hlv_toolkits.data.schemas import PredictionRecord
 from hlv_toolkits.models.trainer import (
     MULTILEVEL_LEVEL_ORDER,
-    MULTILEVEL_LEVEL_SPANS,
-    JointClassificationModel,
     MultiLevelClassificationModel,
-    MultiLevelRegressionModel,
-    NLITrainer,
+    HLVTrainer,
     TrainingConfig,
     resolve_max_length,
 )
@@ -83,20 +80,7 @@ def predict_batch(
             }
             return _build_multilevel_outputs(level_probs)
 
-        if isinstance(model, MultiLevelRegressionModel):
-            pred_scores = torch.sigmoid(logits)
-            level_probs = {}
-            for level in MULTILEVEL_LEVEL_ORDER:
-                start, end = MULTILEVEL_LEVEL_SPANS[level]
-                level_scores = pred_scores[:, start:end]
-                level_probs[level] = level_scores / level_scores.sum(dim=-1, keepdim=True).clamp(min=1e-8)
-            return _build_multilevel_outputs(level_probs)
-
-        if isinstance(model, JointClassificationModel):
-            _, soft_logits = logits
-            probs = torch.softmax(soft_logits, dim=-1)
-        else:
-            probs = torch.softmax(logits, dim=-1)
+        probs = torch.softmax(logits, dim=-1)
 
         preds = torch.argmax(probs, dim=-1)
 
@@ -113,7 +97,7 @@ def predict_batch(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate predictions with trained NLI model")
+    parser = argparse.ArgumentParser(description="Generate predictions with trained HLV model")
 
     parser.add_argument(
         "--model_path",
@@ -122,13 +106,6 @@ def main() -> None:
         help="Path to trained model directory",
     )
 
-    parser.add_argument(
-        "--data_source",
-        type=str,
-        default="snli",
-        choices=["snli", "chaosnli", "discogem", "processed"],
-        help="Data source to predict on",
-    )
 
     parser.add_argument(
         "--split",
@@ -167,34 +144,13 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "--processed_task",
+        "--data_dir",
         type=str,
-        default="nli",
-        choices=["nli", "discogem"],
-        help="Task type stored under data/processed",
+        default=None,
+        help="Direct JSONL dataset directory containing dataset.json",
     )
 
-    parser.add_argument(
-        "--discogem_label_mode",
-        type=str,
-        default="soft",
-        choices=["soft", "hard"],
-        help="Label mode for DiscoGeM prediction",
-    )
-    parser.add_argument(
-        "--discogem_label_level",
-        type=str,
-        default="level2",
-        choices=["level1", "level2", "level3", "all"],
-        help="DiscoGeM label granularity",
-    )
-    parser.add_argument(
-        "--discogem_language",
-        type=str,
-        default="en",
-        choices=["en", "de", "fr", "cs"],
-        help="DiscoGeM language slice to use for version 2.0",
-    )
+
 
     args = parser.parse_args()
 
@@ -209,7 +165,7 @@ def main() -> None:
     if not model_path.exists():
         raise FileNotFoundError(f"Model path not found: {args.model_path}")
 
-    trainer = NLITrainer(TrainingConfig(model_name_or_path=str(model_path)))
+    trainer = HLVTrainer(TrainingConfig(model_name_or_path=str(model_path)))
     trainer.load_model(str(model_path))
     tokenizer = trainer.tokenizer
     model = trainer.model
@@ -219,38 +175,16 @@ def main() -> None:
     model.to(args.device)
     print(f"Model loaded successfully ({type(model).__name__})")
 
-    print(f"Loading {args.data_source} {args.split} split...")
-    if args.data_source == "snli":
-        reader = SNLIReader()
-        samples = reader.load_split(args.split)
-    elif args.data_source == "chaosnli":
-        reader = ChaosNLIReader(data_path="data/external/chaosnli/chaosNLI_snli.jsonl")
-        samples = reader.load_split(args.split)
-    elif args.data_source == "discogem":
-        reader = DiscoGeMReader(
-            data_path="data/external/DiscoGeM/DiscoGeM 2.0/DiscoGeM2.0_annotation.tgz",
-            version="2.0",
-            label_mode=args.discogem_label_mode,
-            label_level=args.discogem_label_level,
-            language=args.discogem_language,
-        )
-        samples = reader.load_split(args.split)
-    elif args.data_source == "processed":
-        processed_data_dir = (
-            "data/processed/discogem.jsonl"
-            if args.processed_task == "discogem"
-            else "data/processed/nli"
-        )
-        reader = ProcessedJSONLReader(
-            data_path=processed_data_dir,
-            task=args.processed_task,
-            label_level=args.discogem_label_level,
-            label_mode=args.discogem_label_mode,
-            language=args.discogem_language,
-        )
-        samples = reader.load_split(args.split)
+    if not args.data_dir:
+        raise ValueError("--data_dir is required for prediction.")
+    manifest = json.loads((Path(args.data_dir) / "dataset.json").read_text(encoding="utf-8"))
+    data_format = manifest.get("format")
+    if data_format == "text_pair_label_distribution":
+        samples = TextPairClassificationJSONLReader(args.data_dir).load_split(args.split)
+    elif data_format == "single_text_label_distribution":
+        samples = SingleTextClassificationJSONLReader(args.data_dir).load_split(args.split)
     else:
-        raise ValueError(f"Unknown data source: {args.data_source}")
+        raise ValueError(f"Unsupported prediction format: {data_format!r}")
 
     print(f"Loaded {len(samples)} samples")
 
@@ -259,8 +193,8 @@ def main() -> None:
 
     for i in range(0, len(samples), batch_size):
         batch_samples = samples[i : i + batch_size]
-        premises = [s.premise for s in batch_samples]
-        hypotheses = [s.hypothesis for s in batch_samples]
+        premises = [s.text_a if hasattr(s, "text_a") else s.premise for s in batch_samples]
+        hypotheses = [s.text_b if hasattr(s, "text_b") else s.hypothesis for s in batch_samples]
 
         batch_outputs = predict_batch(
             model,

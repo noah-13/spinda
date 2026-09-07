@@ -5,44 +5,59 @@ HLV Toolkits is a toolkit for natural language inference (NLI) and distributiona
 ## Datasets
 
 - **SNLI**: hard-label NLI data loaded through Hugging Face `datasets`.
-- **ChaosNLI**: human label distributions from 100 annotators.
+- **ChaosNLI**: converted from its official SNLI JSONL into the shared text-pair `annotation_labels` format.
 - **DiscoGeM 2.0**: English, German, French, and Czech discourse-relation data with hierarchical labels and human distributions.
 - **Processed JSONL**: the normalized format used by the training and evaluation scripts.
+- **Text-pair classification JSONL**: a fixed public format for training on user-provided hard-label datasets; see [data/README.md](data/README.md#public-text-pair-classification-format).
 
 The default data locations are:
 
 ```text
-data/external/chaosnli/
 data/external/DiscoGeM/DiscoGeM 2.0/
 data/processed/
 ```
 
+## Quick start: ChaosNLI
+
+ChaosNLI downloads and prepares the `snli` and `mnli_m` subsets if needed, then runs the three-seed training sweep and test evaluation for fold 0.
+
+```bash
+bash scripts/chaosnli.sh
+```
+
+GPU 0 is used by default; for another visible GPU, run `GPU=1 bash scripts/chaosnli.sh`. Select another split with `FOLD=1 bash scripts/chaosnli.sh`.
+
+The default configuration trains six models with seeds 42, 43, and 44. Final models are written under `outputs/chaosnli/<subset>/fold_<fold>/<model>__<label_mode>__<strategy>/seed_<seed>/final_model`; test artifacts are written beside them under `test/`. Existing final models and `test/evaluation.json` files are skipped. Set `EVALUATE=0` to train only, or `FORCE_EVAL=1` to rerun metrics while reusing existing predictions.
+
+Future datasets should follow the same pattern: one dataset launcher and a short README subsection.
+
+## Prediction and evaluation
+
+Predictions from this toolkit and external models use the same JSONL contract.
+`predict` is for checkpoints trained by this repository; `evaluate` is
+model-agnostic and accepts any prediction file that follows the contract.
+Evaluation accepts either the processed dataset directory (including
+`dataset.json`) or a lightweight external ground-truth JSONL file. See
+[docs/prediction_contract.md](docs/prediction_contract.md) for the required
+fields, optional ignored metadata, and external-model examples.
+
 ## Models and training heads
 
-Models are loaded with Hugging Face `AutoTokenizer`, `AutoModel`, or `AutoModelForSequenceClassification`. Standard encoder-only models such as BERT, RoBERTa, DeBERTa, XLM-R, ModernBERT, and InfoXLM are supported. Decoder-only and encoder-decoder models are not guaranteed to work with the current NLI interface.
+Models are loaded with Hugging Face `AutoTokenizer`, `AutoModel`, or `AutoModelForSequenceClassification`. Standard encoder-only models such as BERT, RoBERTa, DeBERTa, XLM-R, ModernBERT, and InfoXLM are supported. Decoder-only and encoder-decoder models are not guaranteed to work with the current HLV interface.
 
 The training entry point is `hlv_toolkits.scripts.train`. Supported heads are:
 
 - `classification`
-- `joint_classification`
 - `multilevel_classification` for DiscoGeM
-- `multilevel_regression` for DiscoGeM
 
-For the current DiscoGeM experiments, `classification` and `multilevel_classification` use a linear output layer followed by softmax for human distributions. The available soft-label losses are:
+For the current DiscoGeM experiments, `classification` and `multilevel_classification` use a linear output layer followed by softmax for human distributions. The available label-training strategies are:
 
-- `cross_entropy`
-- `kl_div`
+- `ce`
 - `mse` — MSE between the softmax-normalized prediction and the human distribution
+- `jsd` — Jensen–Shannon divergence between the softmax-normalized prediction and the human distribution
+- `rel` — repeated-label CE for text-pair data with raw `annotation_labels`
 
-The current experiment screen does not include BCE or `per_label_regression`.
-
-Model selection can use `accuracy`, `tvd`, or `kl_divergence`. DiscoGeM options include:
-
-```text
---discogem_label_mode soft|hard
---discogem_label_level level1|level2|level3|all
---discogem_language en|de|fr|cs
-```
+Model selection can use `accuracy`, `tvd`, or `kl_divergence`. Label space and label mode come from each direct dataset manifest.
 
 ## Environment and versions
 
@@ -91,172 +106,68 @@ uv sync --extra plot
 
 All commands below should be run from the repository root and through `uv run`, so that the locked environment is used.
 
-## Workflow
+## Shared training settings
 
-```text
-download data
-    ↓
-preprocess to normalized JSONL
-    ↓
-train
-    ↓
-generate predictions
-    ↓
-evaluate and visualize
-```
+[`configs/training.json`](configs/training.json) holds dataset-agnostic training defaults: epochs, learning rate, batch sizes, maximum sequence length, seed, and model-selection metric. Dataset manifests only define their data paths and labels; the scripts layer the shared config before the manifest.
 
-## 1. Download and preprocess
+- ChaosNLI: `bash scripts/chaosnli.sh`
+├── md_agreement.sh
+├── run_single_text_sweep.sh
+- English DiscoGeM, all levels by default: `GPU=0 bash scripts/discogem/english.sh`
+- Use `LEVEL=level1`, `level2`, or `level3` with either DiscoGeM entry to run only that level.
+- ChaosNLI, default three seeds: `GPU=0 bash scripts/chaosnli.sh`
+├── md_agreement.sh
+├── run_single_text_sweep.sh
+- ChaosNLI, only new seeds: `TRAINING_CONFIG=configs/training_new_two_seeds.json GPU=0 bash scripts/chaosnli.sh`
+├── md_agreement.sh
+├── run_single_text_sweep.sh
+- MD-Agreement: `GPU=0 bash scripts/md_agreement.sh`
+- Multilingual DiscoGeM (multilingual encoders only, all levels by default): `GPU=0 bash scripts/discogem/multilingual.sh`
+- DiscoGeM multilevel (English and multilingual by default): `GPU=0 bash scripts/discogem/multilevel.sh`; use `VARIANTS=english` or `VARIANTS=multilingual` to run one variant.
 
-The preprocessing wrapper downloads missing source archives and creates normalized JSONL files. Existing files are not downloaded again.
+Set `LEVEL=level1`, `level2`, or `level3` with either entry to restrict the run to one level.
 
-```bash
-bash scripts/preprocess.sh discogem
-```
 
-The normalized DiscoGeM file is:
+## Dataset preparation
 
-```text
-data/processed/discogem.jsonl
-```
-
-## 2. Training
-
-### Direct DiscoGeM soft-label training
+Prepare direct JSONL datasets with their format-specific exporters:
 
 ```bash
-uv run python -m hlv_toolkits.scripts.train \
-  --data_source discogem \
-  --model roberta-base \
-  --device cuda:0 \
-  --discogem_label_mode soft \
-  --discogem_label_level level2 \
-  --discogem_language en \
-  --soft_label_loss mse \
-  --output_dir outputs/discogem/runs/single/level2/roberta-base__classification__soft_label_loss_mse \
-  --num_epochs 20 \
-  --seeds 42
+# DiscoGeM: text-pair and multilevel data
+uv run python -m hlv_toolkits.scripts.prepare_discogem_annotation_labels
+
+# ChaosNLI: text-pair data
+bash scripts/chaosnli.sh
+├── md_agreement.sh
+├── run_single_text_sweep.sh
+
+# MD-Agreement: single-text data
+bash scripts/md_agreement.sh
 ```
 
-### Shell wrappers
-
-```bash
-DEVICE=cuda:0 bash scripts/discogem/train_discogem_soft.sh
-DEVICE=cpu bash scripts/discogem/train_discogem_hard.sh
-```
-
-The focused RoBERTa-base level2 softmax+MSE train/test wrapper is:
-
-```bash
-MODEL=roberta-base DISCOGEM_LABEL_LEVEL=level2 \
-  DEVICE=cuda:0 bash scripts/discogem/train_test_discogem_soft_mse.sh
-```
-
-The wrapper writes predictions and evaluation to:
-
-```text
-outputs/discogem/runs/single/level2/roberta-base__classification__soft_label_loss_mse/seed_42/test/predictions.jsonl
-outputs/discogem/runs/single/level2/roberta-base__classification__soft_label_loss_mse/seed_42/test/evaluation.json
-```
-
-### Full DiscoGeM screening
-
-The screening script runs the configured encoder models across level1, level2, and level3. It evaluates classification and multilevel classification with cross-entropy, KL divergence, and MSE. It uses W&B project `discogem` by default.
-
-```bash
-DEVICE=cuda:0 bash scripts/discogem/exp_discogem_screen.sh
-```
-
-The default screening output layout is:
-
-```text
-outputs/discogem/screen/<level>/<model>__<head>__<objective>/seed_42/
-```
-
-Use `FORCE_RERUN=0` to skip completed runs and test completed runs whose evaluation file is missing. Set `WANDB_PROJECT`, `WANDB_ENTITY`, `SEED`, `DEVICE`, or `OUT_ROOT` to override defaults.
-
-## 3. Prediction
-
-Generate JSONL predictions from a trained model:
-
-```bash
-uv run python -m hlv_toolkits.scripts.predict \
-  --model_path outputs/snli/hard/seed_42/final_model \
-  --data_source snli \
-  --split test \
-  --device cuda:0 \
-  --batch_size 32 \
-  --output_file outputs/snli/predictions/test.jsonl
-```
-
-For DiscoGeM, pass the matching `--discogem_label_level` and `--discogem_label_mode` used during training.
-
-## 4. Evaluation and visualization
-
-Evaluate predictions against the matching ground truth split:
-
-```bash
-uv run python -m hlv_toolkits.scripts.evaluate \
-  --predictions outputs/snli/predictions/test.jsonl \
-  --ground_truth_source snli \
-  --ground_truth_split test \
-  --output_file outputs/snli/results/test.json
-```
-
-For DiscoGeM, keep predictions and evaluation next to the run:
-
-```bash
-uv run python -m hlv_toolkits.scripts.evaluate \
-  --predictions outputs/discogem/runs/single/level2/roberta-base__classification__soft_label_loss_mse/seed_42/test/predictions.jsonl \
-  --ground_truth_source discogem \
-  --ground_truth_split test \
-  --discogem_label_level level2 \
-  --discogem_label_mode soft \
-  --output_file outputs/discogem/runs/single/level2/roberta-base__classification__soft_label_loss_mse/seed_42/test/evaluation.json
-```
-
-Distributional evaluation reports accuracy, TVD, JSD, KL divergence, soft micro-F1, soft macro-F1, and distance correlation where applicable.
-
-## 5. DiscoGeM dashboard
-
-Generate or refresh the dashboard notebook:
-
-```bash
-uv run python scripts/generate_discogem_dashboard.py
-```
-
-Open [`notebooks/discogem_experiment_dashboard.ipynb`](notebooks/discogem_experiment_dashboard.ipynb) and run `Restart Kernel → Run All`. The final cell automatically exports [`notebooks/discogem_results.html`](notebooks/discogem_results.html).
-
-The dashboard reads all `test/evaluation.json` files from the current `outputs/discogem` layout. It aligns single-level and multilevel results by concrete level, showing level1, level2, level3, and overall multilevel performance separately.
+Train using each generated `dataset.json`; direct data uses either
+`text_pair_label_distribution`, `text_pair_multilevel_label_distribution`, or
+`single_text_label_distribution`. The runnable dataset entry scripts are under
+`scripts/` and `scripts/discogem/`.
 
 ## Project structure
 
 ```text
-hlv_toolkits/
-├── data/
-├── models/
-├── eval/
-├── visualization/
-└── scripts/
-    ├── download_data.py
-    ├── train.py
-    ├── predict.py
-    ├── evaluate.py
-    ├── preprocess.py
-    └── inspect_data.py
+hlv_toolkits/scripts/
+├── download_data.py
+├── train.py
+├── predict.py
+├── evaluate.py
+├── prepare_chaosnli_annotation_labels.py
+├── prepare_discogem_annotation_labels.py
+└── prepare_md_agreement_annotation_labels.py
 
 scripts/
-├── preprocess.sh
-├── generate_discogem_dashboard.py
+├── chaosnli.sh
+├── md_agreement.sh
+├── run_single_text_sweep.sh
 ├── discogem/
-│   ├── exp_discogem_screen.sh
-│   ├── train_discogem_hard.sh
-│   ├── train_discogem_soft.sh
-│   ├── train_discogem_soft_mse.sh
-│   ├── train_test_discogem_soft_mse.sh
-│   └── test_discogem_soft_mse.sh
-└── snli/
-    ├── train_hard.sh
-    └── train_soft.sh
+└── run_text_pair_sweep.sh
 ```
 
 ## Notes

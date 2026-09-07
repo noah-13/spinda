@@ -7,9 +7,11 @@ from hlv_toolkits.data.schemas import (
     DISCOGEM_LABEL2ID,
     DISCOGEM_LABELS,
     DISCOGEM_NUM_LABELS,
-    DiscoGeMMultiLevelSample,
-    NLIDistributionSample,
-    NLISample,
+    MultilevelSample,
+    TextPairClassificationSample,
+    TextPairDistributionSample,
+    SingleTextClassificationSample,
+    SingleTextDistributionSample,
     NLI_ID2LABEL,
     NLI_LABEL2ID,
     NLI_LABELS,
@@ -25,22 +27,21 @@ from hlv_toolkits.data.schemas import (
 )
 from hlv_toolkits.data.readers.base import (
     BaseReader,
-    NLIDistributionReader,
-    NLISingleLabelReader,
 )
-from hlv_toolkits.data.readers.snli_reader import SNLIReader
-from hlv_toolkits.data.readers.chaosnli_reader import ChaosNLIReader
-from hlv_toolkits.data.readers.discogem_reader import DiscoGeMReader
-from hlv_toolkits.data.readers.processed_reader import ProcessedJSONLReader
+from hlv_toolkits.data.readers.multilevel_reader import TextPairMultilevelJSONLReader
+from hlv_toolkits.data.readers.text_pair_reader import TextPairClassificationJSONLReader
+from hlv_toolkits.data.readers.single_text_reader import SingleTextClassificationJSONLReader
 
 __all__ = [
     # Schemas
     "AnySample",
     "BaseSample",
     "DiscoGeMLabelLevel",
-    "NLIDistributionSample",
-    "NLISample",
-    "DiscoGeMMultiLevelSample",
+    "TextPairClassificationSample",
+    "TextPairDistributionSample",
+    "SingleTextClassificationSample",
+    "SingleTextDistributionSample",
+    "MultilevelSample",
     "NLI_ID2LABEL",
     "NLI_LABEL2ID",
     "NLI_LABELS",
@@ -59,10 +60,7 @@ __all__ = [
     "Split",
     # Readers
     "BaseReader",
-    "NLIDistributionReader",
-    "NLISingleLabelReader",
-    "SNLIReader",
-    "ChaosNLIReader",
-    "DiscoGeMReader",
-    "ProcessedJSONLReader",
+    "TextPairMultilevelJSONLReader",
+    "TextPairClassificationJSONLReader",
+    "SingleTextClassificationJSONLReader",
 ]

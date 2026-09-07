@@ -5,8 +5,6 @@ from typing import List, Protocol, runtime_checkable
 
 from hlv_toolkits.data.schemas import (
     AnySample,
-    NLIDistributionSample,
-    NLISample,
     Split,
 )
 
@@ -46,23 +44,3 @@ class BaseReader(ABC):
 
     def load_test(self) -> List[AnySample]:
         return self.load_split("test")
-
-
-class NLISingleLabelReader(BaseReader):
-    """
-    NLI data with single ground-truth labels (e.g., SNLI).
-    Returns `NLISample`.
-    """
-
-    def load_split(self, split: Split) -> List[NLISample]:  # type: ignore[override]
-        raise NotImplementedError
-
-
-class NLIDistributionReader(BaseReader):
-    """
-    NLI data with human annotation distributions (e.g., ChaosNLI).
-    Returns `NLIDistributionSample`.
-    """
-
-    def load_split(self, split: Split) -> List[NLIDistributionSample]:  # type: ignore[override]
-        raise NotImplementedError

@@ -253,21 +253,8 @@ class BaseSample:
 # NLI samples
 # =========================
 @dataclass
-class NLISample(BaseSample):
-    premise: str = ""
-    hypothesis: str = ""
-    label: int = -1  # 0..NLI_NUM_LABELS-1
-
-
-@dataclass
-class NLIDistributionSample(NLISample):
-    # Empirical human label distribution, length == num_labels, sums to ~1.0
-    human_dist: List[float] = field(default_factory=list)
-
-
-@dataclass
-class DiscoGeMMultiLevelSample(BaseSample):
-    """DiscoGeM sample with labels/distributions for all three hierarchy levels."""
+class MultilevelSample(BaseSample):
+    """Text-pair sample with labels/distributions for all three hierarchy levels."""
 
     premise: str = ""
     hypothesis: str = ""
@@ -299,7 +286,34 @@ class PredictionRecord:
 # Convenient unions (optional)
 AnySample = Union[
     BaseSample,
-    NLISample,
-    NLIDistributionSample,
-    DiscoGeMMultiLevelSample,
+    MultilevelSample,
 ]
+
+# Current direct dataset contracts.
+@dataclass
+class TextPairClassificationSample(BaseSample):
+    text_a: str = ""
+    text_b: str = ""
+    label: int = -1
+
+@dataclass
+class TextPairDistributionSample(TextPairClassificationSample):
+    human_dist: List[float] = field(default_factory=list)
+    annotation_labels: List[int] = field(default_factory=list)
+
+@dataclass
+class SingleTextClassificationSample(BaseSample):
+    text: str = ""
+    label: int = -1
+
+@dataclass
+class SingleTextDistributionSample(SingleTextClassificationSample):
+    human_dist: List[float] = field(default_factory=list)
+    annotation_labels: List[int] = field(default_factory=list)
+
+@dataclass
+class MultilevelSample(BaseSample):
+    premise: str = ""
+    hypothesis: str = ""
+    hard_labels: Dict[str, int] = field(default_factory=dict)
+    human_dists: Dict[str, List[float]] = field(default_factory=dict)
