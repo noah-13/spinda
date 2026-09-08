@@ -11,7 +11,7 @@ SWEEP_SCRIPT="${SWEEP_SCRIPT:-scripts/run_text_pair_sweep.sh}"
 OUT_ROOT="${OUT_ROOT:-outputs/discogem/multilevel}"
 # Space-separated subset: english, multilingual, or both (the default).
 VARIANTS="${VARIANTS:-english multilingual}"
-RUN_SPECS="${RUN_SPECS:-soft ce;soft mse;soft jsd;soft rel;hard ce}"
+RUN_SPECS="${RUN_SPECS:-soft ce;soft mse;soft jsd;soft rel;soft_to_hard ce}"
 
 for variant in $VARIANTS; do
   case "$variant" in

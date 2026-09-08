@@ -8,6 +8,7 @@ HLV Toolkits is a toolkit for natural language inference (NLI) and distributiona
 - **ChaosNLI**: converted from its official SNLI JSONL into the shared text-pair `annotation_labels` format.
 - **DiscoGeM 2.0**: English, German, French, and Czech discourse-relation data with hierarchical labels and human distributions.
 - **Processed JSONL**: the normalized format used by the training and evaluation scripts.
+- **MFRC**: Reddit moral-foundation annotations in a dedicated multi-label, per-annotator single-text format.
 - **Text-pair classification JSONL**: a fixed public format for training on user-provided hard-label datasets; see [data/README.md](data/README.md#public-text-pair-classification-format).
 
 The default data locations are:
@@ -122,6 +123,7 @@ All commands below should be run from the repository root and through `uv run`, 
 ├── md_agreement.sh
 ├── run_single_text_sweep.sh
 - MD-Agreement: `GPU=0 bash scripts/md_agreement.sh`
+- MFRC: `GPU=0 bash scripts/mfrc.sh`
 - Multilingual DiscoGeM (multilingual encoders only, all levels by default): `GPU=0 bash scripts/discogem/multilingual.sh`
 - DiscoGeM multilevel (English and multilingual by default): `GPU=0 bash scripts/discogem/multilevel.sh`; use `VARIANTS=english` or `VARIANTS=multilingual` to run one variant.
 

@@ -35,6 +35,7 @@ from hlv_toolkits.data.schemas import (
     TextPairDistributionSample,
     SingleTextClassificationSample,
     SingleTextDistributionSample,
+    SingleTextMultilabelDistributionSample,
     NLI_NUM_LABELS,
     get_discogem_level_num_labels,
 )
@@ -179,10 +180,13 @@ class TrainingConfig:
     gradient_accumulation_steps: int = 1
 
     # Head and objective settings
-    head_type: str = "classification"  # choices: classification, multilevel_classification
+    head_type: str = "classification"  # choices: classification, multilevel_classification, multilabel_classification
 
     # Soft-label training settings
     use_soft_labels: bool = False
+    # ``soft_to_hard`` trains on argmax labels, but retains human distributions
+    # on evaluation so model selection can still use distributional metrics.
+    use_soft_eval_metrics: bool = False
     soft_label_loss: str = "ce"  # choices: ce, mse, jsd, rel
     soft_label_metric_for_best_model: str = "tvd"  # choices: kl_divergence, tvd, accuracy
     multilevel_label_sizes: Optional[Tuple[int, int, int]] = None
@@ -213,10 +217,10 @@ class TrainingConfig:
     wandb_run_name: Optional[str] = None
 
     def to_training_args(self) -> TrainingArguments:
-        valid_head_types = {"classification", "multilevel_classification"}
+        valid_head_types = {"classification", "multilevel_classification", "multilabel_classification"}
         if self.head_type not in valid_head_types:
             raise ValueError(
-                "head_type must be one of: classification, multilevel_classification"
+                "head_type must be one of: classification, multilevel_classification, multilabel_classification"
             )
         if self.soft_label_loss not in {"ce", "mse", "jsd", "rel"}:
             raise ValueError("label_training_strategy must be one of: ce, mse, jsd, rel")
@@ -246,14 +250,16 @@ class TrainingConfig:
 
         metric_for_best_model = "accuracy"
         greater_is_better = True
-        if self.use_soft_labels:
+        if self.use_soft_labels or self.use_soft_eval_metrics:
             metric_for_best_model = self.soft_label_metric_for_best_model
             greater_is_better = metric_for_best_model == "accuracy"
 
-        label_names = ["labels"]
+        label_names = ["soft_labels"] if self.use_soft_eval_metrics else ["labels"]
         if self.head_type == "multilevel_classification":
             rel_training = self.use_soft_labels and self.soft_label_loss == "rel"
-            prefix = "hard_labels" if rel_training or not self.use_soft_labels else "soft_labels"
+            prefix = "soft_labels" if self.use_soft_eval_metrics else (
+                "hard_labels" if rel_training or not self.use_soft_labels else "soft_labels"
+            )
             label_names = [f"{prefix}_{level}" for level in MULTILEVEL_LEVEL_ORDER]
 
         return TrainingArguments(
@@ -402,6 +408,19 @@ class SoftLabelTrainer(Trainer):
         self.soft_label_loss = soft_label_loss
         self.head_type = head_type
 
+    def _set_signature_columns_if_needed(self) -> None:
+        super()._set_signature_columns_if_needed()
+        # Preserve soft reference labels used exclusively by evaluation in
+        # soft-to-hard runs; multilevel loss also needs hard label columns.
+        label_columns = ["soft_labels"]
+        if self.head_type == "multilevel_classification":
+            label_columns.extend(
+                f"{prefix}_{level}"
+                for prefix in ("hard_labels", "soft_labels")
+                for level in MULTILEVEL_LEVEL_ORDER
+            )
+        self._signature_columns = list(set(self._signature_columns + label_columns))
+
     def _compute_soft_loss(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
         labels = labels.to(logits.dtype)
         labels = labels / labels.sum(dim=-1, keepdim=True).clamp(min=1e-8)
@@ -442,7 +461,19 @@ class SoftLabelTrainer(Trainer):
         outputs = model(**_strip_label_inputs(inputs))
         logits = outputs.logits
 
-        if self.head_type == "multilevel_classification":
+        if self.head_type == "multilabel_classification":
+            targets = inputs["labels"].to(logits.dtype)
+            if self.soft_label_loss == "mse":
+                loss = F.mse_loss(torch.sigmoid(logits), targets)
+            elif self.soft_label_loss == "jsd":
+                probs = torch.sigmoid(logits)
+                target_dist = torch.stack((targets, 1 - targets), dim=-1)
+                pred_dist = torch.stack((probs, 1 - probs), dim=-1)
+                mixture = 0.5 * (target_dist + pred_dist)
+                loss = 0.5 * ((target_dist * (target_dist.clamp_min(1e-8).log() - mixture.clamp_min(1e-8).log())).sum(dim=-1) + (pred_dist * (pred_dist.clamp_min(1e-8).log() - mixture.clamp_min(1e-8).log())).sum(dim=-1)).mean()
+            else:
+                loss = F.binary_cross_entropy_with_logits(logits, targets)
+        elif self.head_type == "multilevel_classification":
             rel_training = self.use_soft_labels and self.soft_label_loss == "rel"
             prefix = "hard_labels" if rel_training or not self.use_soft_labels else "soft_labels"
             level_logits = self._level_logits_from_output(logits)
@@ -486,6 +517,8 @@ class HLVTrainer:
             )
         else:
             model_kwargs = {"num_labels": self.config.num_labels}
+            if self.config.head_type == "multilabel_classification":
+                model_kwargs["problem_type"] = "multi_label_classification"
             if self.config.label_names is not None:
                 model_kwargs["id2label"] = {i: label for i, label in enumerate(self.config.label_names)}
                 model_kwargs["label2id"] = {label: i for i, label in enumerate(self.config.label_names)}
@@ -554,23 +587,37 @@ class HLVTrainer:
                 label_columns[key] = values
             return label_columns
 
-        def extract_labels(samples: List[Union[TextPairClassificationSample, TextPairDistributionSample]]) -> List[Union[int, List[float]]]:
+        def extract_labels(samples) -> List[Union[int, List[float]]]:
+            if self.config.head_type == "multilabel_classification":
+                result = []
+                for sample in samples:
+                    if not isinstance(sample, SingleTextMultilabelDistributionSample):
+                        raise ValueError("Multilabel heads require SingleTextMultilabelDistributionSample inputs.")
+                    result.append(list(sample.human_probs) if self.config.use_soft_labels else list(sample.labels))
+                return result
             if not self.config.use_soft_labels:
                 return [s.label for s in samples]
-
             return extract_soft_labels(samples)
 
         def build_dataset(samples: List[Union[TextPairClassificationSample, TextPairDistributionSample, SingleTextClassificationSample, SingleTextDistributionSample, MultilevelSample]]) -> Dataset:
             data = {
-                "text_a": [s.text_a if isinstance(s, TextPairClassificationSample) else s.text if isinstance(s, SingleTextClassificationSample) else s.premise for s in samples],
-                "text_b": [s.text_b if isinstance(s, TextPairClassificationSample) else "" if isinstance(s, SingleTextClassificationSample) else s.hypothesis for s in samples],
+                "text_a": [s.text_a if isinstance(s, TextPairClassificationSample) else s.text if isinstance(s, (SingleTextClassificationSample, SingleTextMultilabelDistributionSample)) else s.premise for s in samples],
+                "text_b": [s.text_b if isinstance(s, TextPairClassificationSample) else "" if isinstance(s, (SingleTextClassificationSample, SingleTextMultilabelDistributionSample)) else s.hypothesis for s in samples],
             }
             if self.config.head_type == "multilevel_classification":
                 if not samples or not isinstance(samples[0], MultilevelSample):
                     raise ValueError("Multilevel heads require MultilevelSample inputs.")
                 data.update(extract_multilevel_labels([s for s in samples if isinstance(s, MultilevelSample)], self.config.use_soft_labels))
+                if self.config.use_soft_eval_metrics:
+                    # Keep both columns: compute_loss reads hard labels, while
+                    # label_names makes the soft labels available to metrics.
+                    data.update(extract_multilevel_labels([s for s in samples if isinstance(s, MultilevelSample)], True))
             else:
                 data["labels"] = extract_labels(samples)  # type: ignore[arg-type]
+                if self.config.use_soft_eval_metrics:
+                    data["soft_labels"] = extract_soft_labels(samples)  # type: ignore[arg-type]
+                if self.config.head_type == "multilabel_classification" and self.config.use_soft_eval_metrics:
+                    data["soft_labels"] = [list(sample.human_probs) for sample in samples if isinstance(sample, SingleTextMultilabelDistributionSample)]
             return Dataset.from_dict(data).map(tokenize_function, batched=True)
 
         def build_rel_dataset(samples: List[Union[TextPairClassificationSample, TextPairDistributionSample]]) -> Dataset:
@@ -589,6 +636,20 @@ class HLVTrainer:
             return Dataset.from_dict({"text_a": text_a, "text_b": text_b, "labels": labels}).map(
                 tokenize_function, batched=True
             )
+
+        def build_multilabel_rel_dataset(samples: List[SingleTextMultilabelDistributionSample]) -> Dataset:
+            text_a: List[str] = []
+            labels: List[List[int]] = []
+            for sample in samples:
+                for annotation in sample.annotation_label_sets:
+                    target = [0] * self.config.num_labels
+                    for label in annotation:
+                        target[label] = 1
+                    text_a.append(sample.text)
+                    labels.append(target)
+            if not labels:
+                raise ValueError("ReL requires at least one multilabel annotation set.")
+            return Dataset.from_dict({"text_a": text_a, "text_b": [""] * len(text_a), "labels": labels}).map(tokenize_function, batched=True)
 
         def build_multilevel_rel_dataset(samples: List[MultilevelSample]) -> Dataset:
             text_a: List[str] = []
@@ -619,11 +680,12 @@ class HLVTrainer:
             )
 
         if self.config.soft_label_loss == "rel":
-            train_dataset = (
-                build_multilevel_rel_dataset([sample for sample in train_samples if isinstance(sample, MultilevelSample)])
-                if self.config.head_type == "multilevel_classification"
-                else build_rel_dataset(train_samples)
-            )
+            if self.config.head_type == "multilevel_classification":
+                train_dataset = build_multilevel_rel_dataset([sample for sample in train_samples if isinstance(sample, MultilevelSample)])
+            elif self.config.head_type == "multilabel_classification":
+                train_dataset = build_multilabel_rel_dataset([sample for sample in train_samples if isinstance(sample, SingleTextMultilabelDistributionSample)])
+            else:
+                train_dataset = build_rel_dataset(train_samples)
         else:
             train_dataset = build_dataset(train_samples)
 
@@ -665,7 +727,7 @@ class HLVTrainer:
                 labels = np.asarray(level_labels[level])
                 pred_labels = probs.argmax(axis=-1)
 
-                if self.config.use_soft_labels:
+                if self.config.use_soft_labels or self.config.use_soft_eval_metrics:
                     labels = labels.astype(np.float32)
                     labels = labels / np.clip(labels.sum(axis=-1, keepdims=True), a_min=1e-8, a_max=None)
                     true_labels = labels.argmax(axis=-1)
@@ -685,7 +747,7 @@ class HLVTrainer:
                     accuracies.append(accuracy)
 
             metrics["accuracy"] = float(np.mean(accuracies)) if accuracies else 0.0
-            if self.config.use_soft_labels:
+            if self.config.use_soft_labels or self.config.use_soft_eval_metrics:
                 metrics["kl_divergence"] = float(np.mean(kls)) if kls else 0.0
                 metrics["tvd"] = float(np.mean(tvrs)) if tvrs else 0.0
             return metrics
@@ -694,6 +756,17 @@ class HLVTrainer:
             predictions = eval_pred.predictions
             labels = eval_pred.label_ids
 
+            if self.config.head_type == "multilabel_classification":
+                pred_probs = torch.sigmoid(torch.tensor(predictions)).cpu().numpy()
+                targets = np.asarray(labels, dtype=np.float32)
+                pred_hard, target_hard = pred_probs >= 0.5, targets >= 0.5
+                denom = pred_hard.sum() + target_hard.sum()
+                micro_f1 = float(2 * np.logical_and(pred_hard, target_hard).sum() / denom) if denom else 1.0
+                accuracy = float(np.all(pred_hard == target_hard, axis=-1).mean())
+                tvd = float(np.abs(pred_probs - targets).mean())
+                eps = 1e-8
+                kl = float(np.mean(targets * np.log((targets + eps) / (pred_probs + eps)) + (1 - targets) * np.log((1 - targets + eps) / (1 - pred_probs + eps))))
+                return {"accuracy": accuracy, "micro_f1": micro_f1, "tvd": tvd, "kl_divergence": kl}
             if self.config.head_type == "multilevel_classification":
                 level_probs, level_labels = _prepare_multilevel_predictions(predictions, labels)
                 return _metrics_from_level_probs(level_probs, level_labels)
@@ -702,7 +775,7 @@ class HLVTrainer:
 
             pred_labels = pred_probs.argmax(axis=-1)
 
-            if self.config.use_soft_labels:
+            if self.config.use_soft_labels or self.config.use_soft_eval_metrics:
                 labels = np.asarray(labels, dtype=np.float32)
                 labels = labels / np.clip(labels.sum(axis=-1, keepdims=True), a_min=1e-8, a_max=None)
                 true_labels = labels.argmax(axis=-1)

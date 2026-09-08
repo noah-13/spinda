@@ -21,6 +21,7 @@ from hlv_toolkits.data import (
     TextPairMultilevelJSONLReader,
     TextPairClassificationJSONLReader,
     SingleTextClassificationJSONLReader,
+    SingleTextMultilabelJSONLReader,
 )
 from hlv_toolkits.models import HLVTrainer, TrainingConfig
 
@@ -91,7 +92,7 @@ def main() -> None:
         "--data_source",
         type=str,
         default="text_pair",
-        choices=["text_pair", "single_text", "multilevel"],
+        choices=["text_pair", "single_text", "single_text_multilabel", "multilevel"],
         help="Training data source; text_pair and multilevel use JSONL dataset contracts",
     )
     parser.add_argument(
@@ -99,7 +100,7 @@ def main() -> None:
         dest="data_format",
         type=str,
         default=None,
-        choices=["text_pair_label_distribution", "single_text_label_distribution", "text_pair_multilevel_label_distribution"],
+        choices=["text_pair_label_distribution", "single_text_label_distribution", "single_text_multilabel_annotation_distribution", "text_pair_multilevel_label_distribution"],
         help="Required format for direct JSONL training data.",
     )
     parser.add_argument("--train_path", type=str, default=None, help="Required JSONL training file for direct text-pair training.")
@@ -164,7 +165,7 @@ def main() -> None:
         "--head_type",
         type=str,
         default="classification",
-        choices=["classification", "multilevel_classification"],
+        choices=["classification", "multilevel_classification", "multilabel_classification"],
         help="Model head type",
     )
     # Output configuration
@@ -238,9 +239,9 @@ def main() -> None:
     args = parser.parse_args(namespace=argparse.Namespace(**config_values))
     direct_dataset_options = (args.data_format, args.train_path, args.dev_path, args.labels, args.level_labels, args.label_mode)
     if any(value is not None for value in direct_dataset_options):
-        if args.data_source not in {"text_pair", "single_text", "multilevel"}:
+        if args.data_source not in {"text_pair", "single_text", "single_text_multilabel", "multilevel"}:
             raise ValueError("format/train_path/dev_path/labels/level_labels/label_mode are only valid for direct JSONL training.")
-        args.data_source = "multilevel" if args.data_format == "text_pair_multilevel_label_distribution" else "single_text" if args.data_format == "single_text_label_distribution" else "text_pair"
+        args.data_source = "multilevel" if args.data_format == "text_pair_multilevel_label_distribution" else "single_text_multilabel" if args.data_format == "single_text_multilabel_annotation_distribution" else "single_text" if args.data_format == "single_text_label_distribution" else "text_pair"
     device = args.device
     if device == "auto":
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -263,10 +264,12 @@ def main() -> None:
     label_names = None
     multilevel_head = args.head_type == "multilevel_classification"
     multilevel_label_sizes = None
-    if multilevel_head and args.data_source not in {"multilevel"}:
+    if multilevel_head and args.data_source != "multilevel":
         raise ValueError("Multilevel heads require multilevel JSONL data.")
     if args.data_source in {"text_pair", "single_text"} and args.head_type != "classification":
-        raise ValueError("The text_pair format currently supports --head_type classification only.")
+        raise ValueError("Text-pair and single-text categorical formats require --head_type classification.")
+    if args.data_source == "single_text_multilabel" and args.head_type != "multilabel_classification":
+        raise ValueError("MFRC requires --head_type multilabel_classification.")
 
     if args.data_source == "text_pair":
         if args.data_format != "text_pair_label_distribution":
@@ -298,6 +301,18 @@ def main() -> None:
         num_labels, label_names, args.use_soft_labels = len(reader.labels), reader.labels, reader.use_soft_labels
         train_samples = reader.load_train()
         eval_samples = reader.load_dev() if reader.has_dev else None
+    elif args.data_source == "single_text_multilabel":
+        if args.data_format != "single_text_multilabel_annotation_distribution" or not args.train_path:
+            raise ValueError("--format single_text_multilabel_annotation_distribution and --train_path are required for MFRC training.")
+        if args.label_mode not in {"soft", "soft_to_hard"}:
+            raise ValueError("MFRC requires --label_mode soft (probability targets) or soft_to_hard (per-label majority vote).")
+        if args.label_mode == "soft_to_hard" and args.soft_label_loss != "ce":
+            raise ValueError("MFRC soft_to_hard training supports only --label_training_strategy ce.")
+        reader = SingleTextMultilabelJSONLReader(data_format=args.data_format, train_path=args.train_path, dev_path=args.dev_path, labels=args.labels)
+        num_labels, label_names = len(reader.labels), reader.labels
+        args.use_soft_labels = args.label_mode == "soft"
+        train_samples = reader.load_train()
+        eval_samples = reader.load_dev() if reader.has_dev else None
     elif args.data_source == "multilevel":
         if args.data_format != "text_pair_multilevel_label_distribution":
             raise ValueError("--format text_pair_multilevel_label_distribution is required for multilevel JSONL training.")
@@ -307,9 +322,9 @@ def main() -> None:
             raise ValueError("--level_labels must contain non-empty level1, level2, and level3 lists.")
         if not multilevel_head:
             raise ValueError("text_pair_multilevel_label_distribution requires a multilevel head.")
-        if args.label_mode not in {None, "soft", "hard"}:
-            raise ValueError("text_pair_multilevel_label_distribution supports label_mode soft or hard.")
-        args.use_soft_labels = args.label_mode != "hard"
+        if args.label_mode not in {None, "soft", "hard", "soft_to_hard"}:
+            raise ValueError("text_pair_multilevel_label_distribution supports label_mode soft, hard, or soft_to_hard.")
+        args.use_soft_labels = args.label_mode == "soft"
         multilevel_label_sizes = tuple(len(args.level_labels[level]) for level in ("level1", "level2", "level3"))
         reader = TextPairMultilevelJSONLReader(data_path=args.train_path, task="discogem", label_level="all", label_mode="soft")
         train_samples = reader.load_train()
@@ -327,7 +342,7 @@ def main() -> None:
     if not args.use_soft_labels and args.soft_label_loss != "ce":
         raise ValueError("Hard and soft_to_hard data only supports --label_training_strategy ce.")
     if args.soft_label_loss == "rel" and not args.use_soft_labels:
-        raise ValueError("ReL requires soft data with multiple annotation_labels per example.")
+        raise ValueError("ReL requires soft data with multiple annotations per example.")
 
     print(f"Loaded {len(train_samples)} training samples")
     print(f"Loaded {0 if eval_samples is None else len(eval_samples)} evaluation samples")
@@ -364,6 +379,7 @@ def main() -> None:
             max_length=args.max_length,
             has_eval=eval_samples is not None,
             use_soft_labels=args.use_soft_labels,
+            use_soft_eval_metrics=(args.data_source in {"text_pair", "single_text", "multilevel", "single_text_multilabel"} and args.label_mode == "soft_to_hard"),
             soft_label_loss=args.soft_label_loss,
             soft_label_metric_for_best_model=args.soft_label_metric_for_best_model,
             head_type=args.head_type,

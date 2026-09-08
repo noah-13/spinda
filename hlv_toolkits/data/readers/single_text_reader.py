@@ -77,7 +77,7 @@ class SingleTextClassificationJSONLReader(BaseReader):
             counts = [votes.count(i) for i in range(len(self.labels))]
             label = max(range(len(self.labels)), key=counts.__getitem__)
             common = dict(id=identifier, task=self.task, split=name, source=self.source, text=text, label=label)
-            if self.label_mode == "soft":
+            if self.label_mode in {"soft", "soft_to_hard"}:
                 samples.append(SingleTextDistributionSample(human_dist=[count / len(votes) for count in counts], annotation_labels=list(votes), **common))
             else:
                 samples.append(SingleTextClassificationSample(**common))

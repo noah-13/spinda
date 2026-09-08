@@ -12,9 +12,10 @@ OUT_ROOT="${OUT_ROOT:?Set OUT_ROOT to the output root.}"
 TRAINING_CONFIG="${TRAINING_CONFIG:-configs/training.json}"
 GPU="${GPU:-0}"
 FORCE="${FORCE:-0}"
+HEAD_TYPE="${HEAD_TYPE:-}"
 MAX_PARALLEL="${MAX_PARALLEL:-4}"
 AUTO_PARALLEL="${AUTO_PARALLEL:-1}"
-AUTO_MIN_FREE_MB="${AUTO_MIN_FREE_MB:-4096}"
+AUTO_MIN_FREE_MB="${AUTO_MIN_FREE_MB:-6144}"
 AUTO_TARGET_GPU_UTIL="${AUTO_TARGET_GPU_UTIL:-101}"
 AUTO_WARMUP_SECONDS="${AUTO_WARMUP_SECONDS:-20}"
 AUTO_POLL_SECONDS="${AUTO_POLL_SECONDS:-10}"
@@ -44,7 +45,8 @@ run() {
   local seed_output_dir="$output_dir/seed_${seed}"
   local final_model_dir="$seed_output_dir/final_model"
   local status_file="$seed_output_dir/$STATUS_FILE_NAME"
-  local resume_checkpoint=""; local -a resume_args=()
+  local resume_checkpoint=""; local -a resume_args=() head_args=()
+  [[ -z "$HEAD_TYPE" ]] || head_args=(--head_type "$HEAD_TYPE")
   if [[ "$FORCE" == "1" ]]; then
     rm -rf "$seed_output_dir"
   elif [[ -f "$final_model_dir/config.json" ]]; then
@@ -59,7 +61,7 @@ run() {
   if uv run python -m hlv_toolkits.scripts.train \
     --config "$TRAINING_CONFIG" "$DATASET_CONFIG" \
     --label_mode "$label_mode" --label_training_strategy "$strategy" \
-    --model "$model" --device "$DEVICE" --output_dir "$output_dir" --seeds "$seed" "${resume_args[@]}"; then
+    --model "$model" --device "$DEVICE" --output_dir "$output_dir" --seeds "$seed" "${head_args[@]}" "${resume_args[@]}"; then
     printf 'completed %s\n' "$(date --iso-8601=seconds)" >> "$status_file"
   else
     printf 'failed %s\n' "$(date --iso-8601=seconds)" >> "$status_file"; return 1

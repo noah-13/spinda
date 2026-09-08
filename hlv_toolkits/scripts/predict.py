@@ -15,7 +15,7 @@ from typing import Any, Dict, List
 
 import torch
 
-from hlv_toolkits.data import SingleTextClassificationJSONLReader, TextPairClassificationJSONLReader, TextPairMultilevelJSONLReader
+from hlv_toolkits.data import SingleTextClassificationJSONLReader, SingleTextMultilabelJSONLReader, TextPairClassificationJSONLReader, TextPairMultilevelJSONLReader
 from hlv_toolkits.data.schemas import PredictionRecord
 from hlv_toolkits.models.trainer import (
     MULTILEVEL_LEVEL_ORDER,
@@ -46,7 +46,7 @@ def predict_batch(
     model,
     tokenizer,
     premises: List[str],
-    hypotheses: List[str],
+    hypotheses: List[str] | None,
     device: str = "cuda",
     max_length: int = 0,
 ) -> List[Dict[str, Any]]:
@@ -62,11 +62,7 @@ def predict_batch(
         "max_length": effective_max_length,
     }
 
-    inputs = tokenizer(
-        premises,
-        hypotheses,
-        **tokenizer_kwargs,
-    )
+    inputs = tokenizer(premises, hypotheses, **tokenizer_kwargs) if hypotheses is not None else tokenizer(premises, **tokenizer_kwargs)
     inputs = {k: v.to(device) for k, v in inputs.items()}
 
     with torch.no_grad():
@@ -80,18 +76,15 @@ def predict_batch(
             }
             return _build_multilevel_outputs(level_probs)
 
-        probs = torch.softmax(logits, dim=-1)
-
-        preds = torch.argmax(probs, dim=-1)
+        multilabel = getattr(model_config, "problem_type", None) == "multi_label_classification"
+        probs = torch.sigmoid(logits) if multilabel else torch.softmax(logits, dim=-1)
+        preds = (probs >= 0.5).long() if multilabel else torch.argmax(probs, dim=-1)
 
     probs_np = probs.cpu().numpy()
     preds_np = preds.cpu().numpy()
 
     return [
-        {
-            "probs": probs_np[idx].tolist(),
-            "pred": int(preds_np[idx]),
-        }
+        {"probs": probs_np[idx].tolist(), "pred": preds_np[idx].tolist() if preds_np.ndim == 2 else int(preds_np[idx])}
         for idx in range(len(premises))
     ]
 
@@ -183,6 +176,8 @@ def main() -> None:
         samples = TextPairClassificationJSONLReader(args.data_dir).load_split(args.split)
     elif data_format == "single_text_label_distribution":
         samples = SingleTextClassificationJSONLReader(args.data_dir).load_split(args.split)
+    elif data_format == "single_text_multilabel_annotation_distribution":
+        samples = SingleTextMultilabelJSONLReader(args.data_dir).load_split(args.split)
     else:
         raise ValueError(f"Unsupported prediction format: {data_format!r}")
 
@@ -193,8 +188,15 @@ def main() -> None:
 
     for i in range(0, len(samples), batch_size):
         batch_samples = samples[i : i + batch_size]
-        premises = [s.text_a if hasattr(s, "text_a") else s.premise for s in batch_samples]
-        hypotheses = [s.text_b if hasattr(s, "text_b") else s.hypothesis for s in batch_samples]
+        if hasattr(batch_samples[0], "text_a"):
+            premises = [s.text_a for s in batch_samples]
+            hypotheses = [s.text_b for s in batch_samples]
+        elif hasattr(batch_samples[0], "text"):
+            premises = [s.text for s in batch_samples]
+            hypotheses = None
+        else:
+            premises = [s.premise for s in batch_samples]
+            hypotheses = [s.hypothesis for s in batch_samples]
 
         batch_outputs = predict_batch(
             model,

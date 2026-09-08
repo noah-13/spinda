@@ -311,6 +311,14 @@ class SingleTextDistributionSample(SingleTextClassificationSample):
     human_dist: List[float] = field(default_factory=list)
     annotation_labels: List[int] = field(default_factory=list)
 
+
+@dataclass
+class SingleTextMultilabelDistributionSample(BaseSample):
+    """Single text with one multi-label label set per annotator."""
+    text: str = ""
+    labels: List[int] = field(default_factory=list)
+    human_probs: List[float] = field(default_factory=list)
+    annotation_label_sets: List[List[int]] = field(default_factory=list)
 @dataclass
 class MultilevelSample(BaseSample):
     premise: str = ""

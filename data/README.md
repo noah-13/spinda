@@ -179,3 +179,26 @@ MD-Agreement is an English single-text offensiveness dataset from LeWiDi 2023. E
 ```
 
 This invokes the versioned Python download step (`hlv_toolkits.scripts.download_data md_agreement`) followed by `hlv_toolkits.scripts.prepare_md_agreement_annotation_labels`. Raw source files remain in `data/external/md_agreement/`; the output is `data/processed/single_text/md_agreement/`.
+
+## MFRC
+
+MFRC (Moral Foundations Reddit Corpus) is exported as `single_text_multilabel_annotation_distribution`, because a Reddit comment can receive several moral-foundation labels from one annotator. Its JSONL rows retain those per-annotator sets in `annotation_label_sets`; the reader derives independent per-label vote probabilities (they intentionally do not sum to one).
+
+```bash
+bash scripts/mfrc.sh
+```
+
+The launcher prepares the data if needed, then runs the shared model/seeds sweep over `soft ce`, `soft mse`, `soft jsd`, `soft rel`, and `soft_to_hard ce`. Set `MODEL_SPECS`, `RUN_SPECS`, `SEEDS_OVERRIDE`, `GPU`, or `FORCE` as for the other launchers. To prepare only, run `uv run python -m hlv_toolkits.scripts.prepare_mfrc_annotation_labels`.
+
+The exporter downloads `USC-MOLA-Lab/MFRC` through `datasets`, groups the source's one-row-per-annotator records into comments, makes a deterministic 80/10/10 train/dev/test split, and writes `data/processed/single_text/mfrc/`. Metadata retains subreddit, topical bucket, annotator IDs, and confidence.
+
+### MFRC training
+
+MFRC uses eight independent sigmoid outputs. Use `label_mode: "soft_to_hard"` with `ce` for the per-label majority-vote baseline, or `label_mode: "soft"` with `ce`, `mse`, `jsd`, or `rel`. In MFRC, `ce` is binary cross-entropy; `rel` expands one full multi-hot target per annotator. `soft_to_hard` trains those thresholded hard targets but retains original vote probabilities for dev `eval_tvd` model selection.
+
+```bash
+uv run python -m hlv_toolkits.scripts.train \
+  --config data/processed/single_text/mfrc/dataset.json configs/training.json \
+  --head_type multilabel_classification --label_mode soft \
+  --label_training_strategy jsd --output_dir outputs/mfrc/jsd
+```

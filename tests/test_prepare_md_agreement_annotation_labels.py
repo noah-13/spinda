@@ -71,3 +71,26 @@ def test_md_agreement_output_loads_as_single_text_soft_dataset(tmp_path):
     assert sample.label == 0
     assert sample.human_dist == [0.6, 0.4]
     assert sample.annotation_labels == [0, 0, 0, 1, 1]
+
+
+def test_md_agreement_soft_to_hard_retains_distribution_for_dev_metrics(tmp_path):
+    from hlv_toolkits.data import SingleTextClassificationJSONLReader
+
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    for split in ("train", "dev", "test"):
+        (raw / f"MD-Agreement_{split}.json").write_text(
+            json.dumps({"1": _item("tweet", split)}), encoding="utf-8"
+        )
+    output = tmp_path / "processed"
+    prepare_md_agreement(raw, output)
+
+    sample = SingleTextClassificationJSONLReader(
+        data_format="single_text_label_distribution",
+        train_path=str(output / "train.jsonl"),
+        dev_path=str(output / "dev.jsonl"),
+        labels=["not_offensive", "offensive"],
+        label_mode="soft_to_hard",
+    ).load_train()[0]
+    assert sample.label == 0
+    assert sample.human_dist == [0.6, 0.4]

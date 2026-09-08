@@ -12,6 +12,7 @@ from hlv_toolkits.data.schemas import (
     TextPairDistributionSample,
     SingleTextClassificationSample,
     SingleTextDistributionSample,
+    SingleTextMultilabelDistributionSample,
     NLI_ID2LABEL,
     NLI_LABEL2ID,
     NLI_LABELS,
@@ -31,6 +32,7 @@ from hlv_toolkits.data.readers.base import (
 from hlv_toolkits.data.readers.multilevel_reader import TextPairMultilevelJSONLReader
 from hlv_toolkits.data.readers.text_pair_reader import TextPairClassificationJSONLReader
 from hlv_toolkits.data.readers.single_text_reader import SingleTextClassificationJSONLReader
+from hlv_toolkits.data.readers.single_text_multilabel_reader import SingleTextMultilabelJSONLReader
 
 __all__ = [
     # Schemas
@@ -41,6 +43,7 @@ __all__ = [
     "TextPairDistributionSample",
     "SingleTextClassificationSample",
     "SingleTextDistributionSample",
+    "SingleTextMultilabelDistributionSample",
     "MultilevelSample",
     "NLI_ID2LABEL",
     "NLI_LABEL2ID",
@@ -63,4 +66,5 @@ __all__ = [
     "TextPairMultilevelJSONLReader",
     "TextPairClassificationJSONLReader",
     "SingleTextClassificationJSONLReader",
+    "SingleTextMultilabelJSONLReader",
 ]

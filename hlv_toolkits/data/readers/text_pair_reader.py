@@ -269,10 +269,7 @@ class TextPairClassificationJSONLReader(BaseReader):
                 if abs(sum(dist) - 1.0) > 1e-6:
                     raise ValueError(f"Line {line_number} in {path} label_distribution must sum to 1.")
                 hard_label = max(range(len(dist)), key=dist.__getitem__)
-                if self.label_mode == "soft_to_hard":
-                    samples.append(TextPairClassificationSample(label=hard_label, **common))
-                else:
-                    samples.append(TextPairDistributionSample(label=hard_label, human_dist=dist, annotation_labels=list(record["annotation_labels"]), **common))
+                samples.append(TextPairDistributionSample(label=hard_label, human_dist=dist, annotation_labels=list(record["annotation_labels"]), **common))
             else:
                 label = record["label"]
                 if isinstance(label, bool) or not isinstance(label, int) or not 0 <= label < len(self.labels):
