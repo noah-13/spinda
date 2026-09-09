@@ -19,6 +19,7 @@ from hlv_toolkits.eval.metrics import (
     compute_distance_correlation,
     compute_euclidean_distance,
     compute_jsd,
+    compute_pojsd,
     compute_kl,
     compute_cross_entropy,
     compute_soft_macro_f1,
@@ -157,6 +158,7 @@ class Evaluator:
         accuracy = (pred_labels == true_labels).mean()
         tvd = compute_tvd(pred_probs, human_probs)
         jsd = compute_jsd(pred_probs, human_probs, base=2)
+        pojsd = compute_pojsd(pred_probs, human_probs)
         kl = compute_kl(human_probs, pred_probs)
         soft_micro_f1 = compute_soft_micro_f1(pred_probs, human_probs)
         soft_macro_f1 = compute_soft_macro_f1(pred_probs, human_probs)
@@ -169,6 +171,7 @@ class Evaluator:
                 "accuracy": float(accuracy),
                 "tvd": float(np.mean(tvd)),
                 "jsd": float(np.mean(jsd)),
+                "pojsd": float(np.mean(pojsd)),
                 "kl": float(np.mean(kl)),
                 "soft_micro_f1": float(soft_micro_f1),
                 "soft_macro_f1": float(soft_macro_f1),

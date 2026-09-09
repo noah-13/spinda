@@ -9,6 +9,7 @@ from hlv_toolkits.eval.metrics import (
     compute_tvd,
     compute_distance_correlation,
     compute_jsd,
+    compute_pojsd,
     compute_kl,
     compute_soft_macro_f1,
     compute_soft_micro_f1,
@@ -153,6 +154,14 @@ class TestJSD:
         d = compute_jsd(p, q, base=math.e)
         assert d.shape == (1,)
         assert d[0] == pytest.approx(math.sqrt(math.log(2)), abs=1e-6)  # JSD with natural log should be ln(2) for completely different distributions
+
+    def test_compute_pojsd_matches_external_convention(self):
+        p = np.array([[1.0, 0.0], [0.5, 0.5]])
+        q = np.array([[0.0, 1.0], [0.5, 0.5]])
+
+        score = compute_pojsd(p, q)
+
+        assert score == pytest.approx([0.0, 1.0], abs=1e-6)
 
 class TestSoftF1:
     def test_compute_soft_micro_f1(self):

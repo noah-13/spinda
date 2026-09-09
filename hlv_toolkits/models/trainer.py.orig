@@ -197,7 +197,7 @@ class TrainingConfig:
     save_strategy: str = "epoch"
     eval_strategy: str = "epoch"
     has_eval: bool = True
-    save_total_limit: int = 1
+    save_total_limit: int = 3
 
     # Tokenization settings
     max_length: int = 0  # 0 means auto-resolve from tokenizer/model config.
@@ -612,13 +612,10 @@ class HLVTrainer:
                 if not samples or not isinstance(samples[0], MultilevelSample):
                     raise ValueError("Multilevel heads require MultilevelSample inputs.")
                 data.update(extract_multilevel_labels([s for s in samples if isinstance(s, MultilevelSample)], self.config.use_soft_labels))
-                rel_training = self.config.use_soft_labels and self.config.soft_label_loss == "rel"
-                if self.config.use_soft_eval_metrics or rel_training:
+                if self.config.use_soft_eval_metrics:
                     # Keep both columns: compute_loss reads hard labels, while
                     # label_names makes the soft labels available to metrics.
-                    # ReL starts with soft columns above, so add the hard
-                    # labels required by its training/evaluation loss.
-                    data.update(extract_multilevel_labels([s for s in samples if isinstance(s, MultilevelSample)], not self.config.use_soft_labels))
+                    data.update(extract_multilevel_labels([s for s in samples if isinstance(s, MultilevelSample)], True))
             else:
                 data["labels"] = extract_labels(samples)  # type: ignore[arg-type]
                 if self.config.use_soft_eval_metrics:

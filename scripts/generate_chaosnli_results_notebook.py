@@ -73,9 +73,12 @@ for path in sorted(RUN_ROOT.glob('*/*/*/seed_*/test/evaluation.json')):
     row['path'] = str(seed_dir.relative_to(ROOT)); rows.append(row)
 results = pd.DataFrame(rows)
 if results.empty: raise FileNotFoundError(f'No evaluation.json under {RUN_ROOT}')
-metrics = ['accuracy', 'tvd', 'jsd', 'kl', 'soft_micro_f1', 'soft_macro_f1', 'distance_correlation', 'l2', 'ce']
+metrics = ['accuracy', 'tvd', 'jsd', 'pojsd', 'kl', 'soft_micro_f1', 'soft_macro_f1', 'distance_correlation', 'l2', 'ce']
+available_metrics = [metric for metric in metrics if metric in results]
 results = results.sort_values(['subset', 'fold', 'model', 'setting', 'seed']).reset_index(drop=True)
 print(f'Loaded {len(results)} seed-level evaluations; displays use three-seed averages only.')
+print('Available test metrics:', ', '.join(available_metrics))
+display(results[['subset', 'fold', 'model', 'setting', 'seed', *available_metrics]])
 """),
         cell("code", """# Completion: default = 6 models × 5 settings × 3 seeds = 90 runs per subset/fold.
 coverage = results.groupby(['subset', 'fold'], as_index=False).agg(completed_runs=('seed', 'size'), models=('model', 'nunique'), settings=('setting', 'nunique'), seeds=('seed', lambda x: ', '.join(map(str, sorted(set(x))))))
@@ -93,17 +96,26 @@ for (subset, fold), group in results.groupby(['subset', 'fold']):
 print('Default sweep is complete.' if not missing else f'Missing {len(missing)} runs.')
 if missing: display(pd.DataFrame(missing, columns=['subset', 'fold', 'model', 'setting', 'seed']))
 """),
-        cell("code", """# Aggregate seeds first. The rank is by mean test TVD (lower is better).
-summary = results.groupby(['subset', 'fold', 'model', 'setting'], as_index=False).agg(seeds=('seed', 'nunique'), test_tvd_mean=('tvd', 'mean'), test_accuracy_mean=('accuracy', 'mean'), test_jsd_mean=('jsd', 'mean'), test_kl_mean=('kl', 'mean'), dev_tvd_mean=('dev_best_tvd', 'mean')).sort_values(['subset', 'fold', 'test_tvd_mean', 'test_accuracy_mean'], ascending=[True, True, True, False]).reset_index(drop=True)
-display(summary)
+        cell("code", """# Average the three seeds, then show every training setting within each model.
+summary_aggregations = {'seeds': ('seed', 'nunique'), 'dev_tvd_mean': ('dev_best_tvd', 'mean')}
+summary_aggregations.update({f'test_{metric}_mean': (metric, 'mean') for metric in available_metrics})
+summary = results.groupby(['subset', 'fold', 'model', 'setting'], as_index=False).agg(**summary_aggregations)
+summary = summary.sort_values(['subset', 'fold', 'model', 'test_tvd_mean', 'test_accuracy_mean'], ascending=[True, True, True, True, False]).reset_index(drop=True)
+
+model_result_columns = ['setting', 'seeds', 'dev_tvd_mean', *[f'test_{metric}_mean' for metric in available_metrics]]
+for (subset, fold, model), model_results in summary.groupby(['subset', 'fold', 'model'], sort=False):
+    print(f'{subset} / fold {fold} / {model}')
+    display(model_results[model_result_columns].reset_index(drop=True))
 
 print('Best configuration per subset/fold:')
-display(summary.groupby(['subset', 'fold'], group_keys=False).head(1))
+display(summary.groupby(['subset', 'fold'], group_keys=False).head(1)[['subset', 'fold', 'model', *model_result_columns]])
 print('Top ten configurations per subset/fold:')
-display(summary.groupby(['subset', 'fold'], group_keys=False).head(10))
+display(summary.groupby(['subset', 'fold'], group_keys=False).head(10)[['subset', 'fold', 'model', *model_result_columns]])
 """),
-        cell("code", """# Strategy comparison using three-seed means for each model.
-strategy_summary = results.groupby(['subset', 'fold', 'setting'], as_index=False).agg(test_tvd_mean=('tvd', 'mean'), test_accuracy_mean=('accuracy', 'mean'), dev_tvd_mean=('dev_best_tvd', 'mean')).sort_values(['subset', 'fold', 'test_tvd_mean'])
+        cell("code", """# Strategy comparison using every available test metric across seeds and models.
+strategy_aggregations = {'dev_tvd_mean': ('dev_best_tvd', 'mean')}
+strategy_aggregations.update({f'test_{metric}_mean': (metric, 'mean') for metric in available_metrics})
+strategy_summary = results.groupby(['subset', 'fold', 'setting'], as_index=False).agg(**strategy_aggregations).sort_values(['subset', 'fold', 'test_tvd_mean'])
 display(strategy_summary)
 """),
         cell("code", """# Strategy comparison based on three-seed averages; no individual-seed values are shown.

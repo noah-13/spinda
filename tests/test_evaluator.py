@@ -21,6 +21,7 @@ def test_distribution_evaluation_reports_all_supported_metrics():
         "accuracy",
         "tvd",
         "jsd",
+        "pojsd",
         "kl",
         "soft_micro_f1",
         "soft_macro_f1",

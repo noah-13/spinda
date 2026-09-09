@@ -277,6 +277,29 @@ def compute_jsd(
 
     return np.sqrt(jsd)
 
+
+def compute_pojsd(
+    pred_probs: np.ndarray,
+    human_probs: np.ndarray,
+    *,
+    epsilon: float = 1e-12,
+) -> np.ndarray:
+    """Per-sample probability-of-Jensen--Shannon-divergence score.
+
+    This follows the ``poJSD`` convention used by the external
+    ``train-eval-hlv`` implementation: it is ``1 - JSD`` with base-2
+    logarithms and *without* the square root. It is therefore a similarity
+    score in ``[0, 1]`` where higher is better, unlike :func:`compute_jsd`,
+    which returns Jensen--Shannon distance where lower is better.
+    """
+    js_distance = compute_jsd(
+        pred_probs,
+        human_probs,
+        base=2,
+        epsilon=epsilon,
+    )
+    return 1.0 - np.square(js_distance)
+
 """
 Kemal's soft f1 https://arxiv.org/abs/2502.01891
 """

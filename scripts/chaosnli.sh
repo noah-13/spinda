@@ -22,6 +22,7 @@ export CUDA_VISIBLE_DEVICES="${GPU:-0}"
 evaluate_completed_runs() {
   local dataset_dir="$1" run_dir="$2"
   local model_config model_dir seed_dir test_dir predictions evaluation
+  local required_metrics='accuracy tvd jsd pojsd kl soft_micro_f1 soft_macro_f1 distance_correlation l2 ce'
 
   while IFS= read -r -d '' model_config; do
     model_dir="${model_config%/config.json}"
@@ -30,7 +31,13 @@ evaluate_completed_runs() {
     predictions="$test_dir/predictions.jsonl"
     evaluation="$test_dir/evaluation.json"
 
-    if [[ "$FORCE_EVAL" != "1" && -f "$evaluation" ]]; then
+    if [[ "$FORCE_EVAL" != "1" && -f "$evaluation" ]] && uv run python -c '
+import json, sys
+required = set(sys.argv[2:])
+with open(sys.argv[1], encoding="utf-8") as file:
+    metrics = json.load(file)
+raise SystemExit(not required.issubset(metrics))
+' "$evaluation" $required_metrics; then
       echo "Skipping completed evaluation: $seed_dir"
       continue
     fi
