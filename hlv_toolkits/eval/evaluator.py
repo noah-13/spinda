@@ -11,7 +11,6 @@ from hlv_toolkits.data.schemas import (
     SingleTextDistributionSample,
     TextPairClassificationSample,
     TextPairDistributionSample,
-    NLI_NUM_LABELS,
     PredictionRecord,
 )
 from hlv_toolkits.eval.metrics import (

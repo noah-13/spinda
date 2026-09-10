@@ -59,7 +59,6 @@ raise SystemExit(not required.issubset(metrics))
   done < <(find "$run_dir" -type f -path '*/seed_*/final_model/config.json' -print0 | sort -z)
 }
 
-uv run python -m hlv_toolkits.scripts.download_data chaosnli --chaosnli-dir "$INPUT_DIR"
 for subset in $SUBSETS; do
   dataset_dir="$DATA_DIR/$subset/$FOLD"
   dataset_config="$DATA_DIR/$subset/$FOLD/dataset.json"

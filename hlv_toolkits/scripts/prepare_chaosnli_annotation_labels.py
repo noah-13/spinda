@@ -14,6 +14,8 @@ import random
 from pathlib import Path
 from typing import Any
 
+from hlv_toolkits.scripts.download_data import download_chaosnli
+
 
 LABELS = ["entailment", "neutral", "contradiction"]
 SUBSET_FILENAMES = {
@@ -155,6 +157,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    download_chaosnli(args.input_dir)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     for subset in args.subsets:
         input_path = args.input_dir / SUBSET_FILENAMES[subset]

@@ -12,7 +12,6 @@ OUT_ROOT="${OUT_ROOT:?Set OUT_ROOT to the output root.}"
 TRAINING_CONFIG="${TRAINING_CONFIG:-configs/training.json}"
 GPU="${GPU:-0}"
 FORCE="${FORCE:-0}"
-HEAD_TYPE="${HEAD_TYPE:-classification}"
 STATUS_FILE_NAME="run-status.txt"
 if [[ -n "${SEEDS_OVERRIDE:-}" ]]; then
   read -r -a SEEDS <<< "$SEEDS_OVERRIDE"
@@ -48,7 +47,7 @@ run() {
   [[ -z "$resume_checkpoint" ]] || resume_args=(--resume_from_checkpoint "$resume_checkpoint")
   if uv run python -m hlv_toolkits.scripts.train \
     --config "$TRAINING_CONFIG" "$DATASET_CONFIG" \
-    --label_mode "$label_mode" --label_training_strategy "$strategy" --head_type "$HEAD_TYPE" \
+    --label_mode "$label_mode" --label_training_strategy "$strategy" \
     --model "$model" --device "$DEVICE" --output_dir "$output_dir" --seeds "$seed" "${resume_args[@]}"; then
     printf 'completed %s\n' "$(date --iso-8601=seconds)" >> "$status_file"
   else

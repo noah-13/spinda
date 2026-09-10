@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import List, Optional, Sequence
 
 from hlv_toolkits.data.readers.base import BaseReader
+from hlv_toolkits.data.tie_breaking import binary_threshold
 from hlv_toolkits.data.schemas import SingleTextMultilabelDistributionSample, Split
 
 SINGLE_TEXT_MULTILABEL_TASK = "single_text_multilabel_annotation_distribution"
@@ -63,5 +64,5 @@ class SingleTextMultilabelJSONLReader(BaseReader):
                 raise ValueError(f"Line {line_number} in {path} annotation_label_sets must be non-empty lists of valid, unique label indices.")
             seen.add(identifier)
             probs = [sum(label in vote for vote in votes) / len(votes) for label in range(len(self.labels))]
-            samples.append(SingleTextMultilabelDistributionSample(id=identifier, task=self.task, split=name, source=self.source, text=text, labels=[int(prob >= 0.5) for prob in probs], human_probs=probs, annotation_label_sets=[list(vote) for vote in votes]))
+            samples.append(SingleTextMultilabelDistributionSample(id=identifier, task=self.task, split=name, source=self.source, text=text, labels=[binary_threshold(prob, identifier, f"{SINGLE_TEXT_MULTILABEL_TASK}:label:{index}") for index, prob in enumerate(probs)], human_probs=probs, annotation_label_sets=[list(vote) for vote in votes]))
         return samples

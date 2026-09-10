@@ -9,6 +9,7 @@ HLV Toolkits is a toolkit for natural language inference (NLI) and distributiona
 - **DiscoGeM 2.0**: English, German, French, and Czech discourse-relation data with hierarchical labels and human distributions.
 - **Processed JSONL**: the normalized format used by the training and evaluation scripts.
 - **MFRC**: Reddit moral-foundation annotations in a dedicated multi-label, per-annotator single-text format.
+- **MultiPICo**: multilingual post/reply irony annotations aggregated into per-conversation label distributions.
 - **Text-pair classification JSONL**: a fixed public format for training on user-provided hard-label datasets; see [data/README.md](data/README.md#public-text-pair-classification-format).
 
 The default data locations are:
@@ -124,6 +125,9 @@ All commands below should be run from the repository root and through `uv run`, 
 ├── run_single_text_sweep.sh
 - MD-Agreement: `GPU=0 bash scripts/md_agreement.sh`
 - MFRC: `GPU=0 bash scripts/mfrc.sh`
+- Humans-and-Domains/TGeGUM: `GPU=0 bash scripts/humans_and_domains.sh`
+- MultiPICo multilingual: `GPU=0 bash scripts/multipico/multilingual.sh`
+- MultiPICo English-only: `GPU=0 bash scripts/multipico/english.sh`
 - Multilingual DiscoGeM (multilingual encoders only, all levels by default): `GPU=0 bash scripts/discogem/multilingual.sh`
 - DiscoGeM multilevel (English and multilingual by default): `GPU=0 bash scripts/discogem/multilevel.sh`; use `VARIANTS=english` or `VARIANTS=multilingual` to run one variant.
 
@@ -151,6 +155,34 @@ Train using each generated `dataset.json`; direct data uses either
 `text_pair_label_distribution`, `text_pair_multilevel_label_distribution`, or
 `single_text_label_distribution`. The runnable dataset entry scripts are under
 `scripts/` and `scripts/discogem/`.
+
+## MultiPICo
+
+MultiPICo is downloaded from the official LeWiDi MP release, which provides
+the benchmark train/dev/test split (12,017 / 3,005 / 3,756 conversations).
+The exporter preserves each conversation's original annotator votes and writes
+a soft `text_pair_label_distribution` dataset to
+`data/processed/text_pair/multipico/`.
+
+```bash
+GPU=0 bash scripts/multipico/multilingual.sh
+# English-only counterpart
+GPU=0 bash scripts/multipico/english.sh
+```
+
+The launcher sweeps `soft ce`, `soft mse`, `soft jsd`, `soft rel`, and
+`soft_to_hard ce`. Its generated manifest fixes best-model selection to
+development-set TVD.
+
+## Humans-and-Domains / TGeGUM
+
+The official sentence-level TGeGUM splits are exported as three independent soft-label tasks (`genre`, `topic1`, and `topic2`) under `data/processed/single_text/humans_and_domains/`, plus one shared three-head experiment under `data/processed/single_text/humans_and_domains/multilevel/`. The latter maps `level1=genre`, `level2=topic1`, and `level3=topic2`; only the two topic heads form a true hierarchy. All runs select checkpoints with development-set TVD.
+
+```bash
+GPU=0 bash scripts/humans_and_domains.sh
+# Restrict work, for example:
+TASKS="genre topic1" GPU=0 bash scripts/humans_and_domains.sh
+```
 
 ## Project structure
 

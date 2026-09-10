@@ -9,7 +9,7 @@ gpu="${GPU:-0}"
 DATASET_CONFIG="data/processed/text_pair/discogem/english/multilevel/dataset.json" \
 RUN_NAME="english" \
 OUT_ROOT="outputs/discogem/multilevel" \
-HEAD_TYPE="multilevel_classification" \
+\
 MODEL_SPECS="microsoft/deberta-v3-large" \
 RUN_SPECS="soft rel" \
 SEEDS_OVERRIDE="42 43 44" \

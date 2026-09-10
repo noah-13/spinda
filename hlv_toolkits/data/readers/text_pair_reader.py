@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Iterator, List, Literal, Optional, Sequence
 
 from hlv_toolkits.data.readers.base import BaseReader
+from hlv_toolkits.data.tie_breaking import tied_argmax
 from hlv_toolkits.data.schemas import Split, TextPairClassificationSample, TextPairDistributionSample
 
 TEXT_PAIR_TASK = "text_pair_label_distribution"
@@ -152,7 +153,7 @@ class TextPairClassificationJSONLReader(BaseReader):
             counts = [0] * num_labels
             for label in annotations:
                 counts[label] += 1
-            record["label"] = max(range(num_labels), key=counts.__getitem__)
+            record["label"] = tied_argmax(counts, str(record.get("id", "")), TEXT_PAIR_TASK)
             record["label_distribution"] = [count / len(annotations) for count in counts]
             yield line_number, record
 
@@ -216,6 +217,14 @@ class TextPairClassificationJSONLReader(BaseReader):
             raise ValueError(f"Could not infer at least two labels from {path}.")
         return max_label + 1
 
+    @staticmethod
+    def _hard_label_from_distribution(distribution: Sequence[float], sample_id: str, random_ties: bool) -> int:
+        maximum = max(distribution)
+        tied = [index for index, value in enumerate(distribution) if value == maximum]
+        if len(tied) == 1 or not random_ties:
+            return tied[0]
+        return tied_argmax(distribution, sample_id, TEXT_PAIR_TASK)
+
     def _path_for_split(self, split: str) -> Path:
         if split == "train":
             return self.train_path
@@ -268,7 +277,7 @@ class TextPairClassificationJSONLReader(BaseReader):
                 dist = [float(x) for x in dist]
                 if abs(sum(dist) - 1.0) > 1e-6:
                     raise ValueError(f"Line {line_number} in {path} label_distribution must sum to 1.")
-                hard_label = max(range(len(dist)), key=dist.__getitem__)
+                hard_label = self._hard_label_from_distribution(dist, record["id"], True)
                 samples.append(TextPairDistributionSample(label=hard_label, human_dist=dist, annotation_labels=list(record["annotation_labels"]), **common))
             else:
                 label = record["label"]

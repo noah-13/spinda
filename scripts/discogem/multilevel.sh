@@ -35,6 +35,6 @@ for variant in $VARIANTS; do
   variant_models="${MODEL_SPECS:-$default_models}"
   DATASET_CONFIG="$dataset_config" RUN_NAME="$variant" OUT_ROOT="$OUT_ROOT" \
     TRAINING_CONFIG="$TRAINING_CONFIG" MODEL_SPECS="$variant_models" RUN_SPECS="$RUN_SPECS" \
-    HEAD_TYPE="multilevel_classification" SEEDS_OVERRIDE="${SEEDS_OVERRIDE:-}" GPU="${GPU:-0}" FORCE="${FORCE:-0}" \
+    SEEDS_OVERRIDE="${SEEDS_OVERRIDE:-}" GPU="${GPU:-0}" FORCE="${FORCE:-0}" \
     bash "$SWEEP_SCRIPT"
 done

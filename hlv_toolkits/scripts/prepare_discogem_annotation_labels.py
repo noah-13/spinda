@@ -13,6 +13,8 @@ import io
 import json
 import tarfile
 from collections import Counter
+
+from hlv_toolkits.data.tie_breaking import tied_argmax
 from fractions import Fraction
 from pathlib import Path
 
@@ -166,7 +168,7 @@ def _write_multilevel_variant(rows: list[dict[str, str]], output_root: Path, var
                     level: [level_votes.count(index) / len(level_votes) for index in range(len(LABELS[level]))]
                     for level, level_votes in votes.items()
                 }
-                hard_labels = {level: max(range(len(dist)), key=dist.__getitem__) for level, dist in human_dists.items()}
+                hard_labels = {level: tied_argmax(dist, sample_id, f"discogem:{level}") for level, dist in human_dists.items()}
                 record = {
                     "_schema": "MultilevelSample",
                     "id": sample_id if variant == "english" else f"{language}:{sample_id}",

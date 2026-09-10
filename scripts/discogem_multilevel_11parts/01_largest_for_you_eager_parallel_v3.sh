@@ -44,7 +44,7 @@ run_task() {
   if uv run python -m hlv_toolkits.scripts.train --config configs/training.json \
     "data/processed/text_pair/discogem/$variant/multilevel/dataset.json" \
     --label_mode "$label_mode" --label_training_strategy "$strategy" \
-    --head_type multilevel_classification --model "$model" --device cuda:0 \
+    --model "$model" --device cuda:0 \
     --output_dir "$output_dir" --seeds "$seed" "${resume_arg[@]}" 2>&1 | tee -a "$log_file"; then
     printf 'completed %s\n' "$(date --iso-8601=seconds)" >> "$status_file"
   else

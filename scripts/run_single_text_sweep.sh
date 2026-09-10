@@ -12,7 +12,6 @@ OUT_ROOT="${OUT_ROOT:?Set OUT_ROOT to the output root.}"
 TRAINING_CONFIG="${TRAINING_CONFIG:-configs/training.json}"
 GPU="${GPU:-0}"
 FORCE="${FORCE:-0}"
-HEAD_TYPE="${HEAD_TYPE:-}"
 STATUS_FILE_NAME="run-status.txt"
 if [[ -n "${SEEDS_OVERRIDE:-}" ]]; then
   read -r -a SEEDS <<< "$SEEDS_OVERRIDE"
@@ -34,8 +33,7 @@ run() {
   local seed_output_dir="$output_dir/seed_${seed}"
   local final_model_dir="$seed_output_dir/final_model"
   local status_file="$seed_output_dir/$STATUS_FILE_NAME"
-  local resume_checkpoint=""; local -a resume_args=() head_args=()
-  [[ -z "$HEAD_TYPE" ]] || head_args=(--head_type "$HEAD_TYPE")
+  local resume_checkpoint=""; local -a resume_args=()
   if [[ "$FORCE" == "1" ]]; then
     rm -rf "$seed_output_dir"
   elif [[ -f "$final_model_dir/config.json" ]]; then
@@ -50,7 +48,7 @@ run() {
   if uv run python -m hlv_toolkits.scripts.train \
     --config "$TRAINING_CONFIG" "$DATASET_CONFIG" \
     --label_mode "$label_mode" --label_training_strategy "$strategy" \
-    --model "$model" --device "$DEVICE" --output_dir "$output_dir" --seeds "$seed" "${head_args[@]}" "${resume_args[@]}"; then
+    --model "$model" --device "$DEVICE" --output_dir "$output_dir" --seeds "$seed" "${resume_args[@]}"; then
     printf 'completed %s\n' "$(date --iso-8601=seconds)" >> "$status_file"
   else
     printf 'failed %s\n' "$(date --iso-8601=seconds)" >> "$status_file"; return 1

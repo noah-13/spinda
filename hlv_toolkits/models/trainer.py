@@ -29,15 +29,13 @@ from transformers.trainer_utils import EvalPrediction
 from transformers.utils import ModelOutput
 
 from hlv_toolkits.data.schemas import (
-    DISCOGEM_LEVEL_ORDER,
     MultilevelSample,
     TextPairClassificationSample,
     TextPairDistributionSample,
     SingleTextClassificationSample,
     SingleTextDistributionSample,
     SingleTextMultilabelDistributionSample,
-    NLI_NUM_LABELS,
-    get_discogem_level_num_labels,
+    SingleTextMultilevelSample,
 )
 
 
@@ -86,15 +84,8 @@ def resolve_max_length(tokenizer, config, requested_max_length: int) -> int:
     return 512
 
 
-MULTILEVEL_LEVEL_SIZES = get_discogem_level_num_labels()
-MULTILEVEL_LEVEL_ORDER = tuple(DISCOGEM_LEVEL_ORDER)
-MULTILEVEL_LEVEL_SPANS = {}
-_offset = 0
-for _level in MULTILEVEL_LEVEL_ORDER:
-    _size = MULTILEVEL_LEVEL_SIZES[_level]
-    MULTILEVEL_LEVEL_SPANS[_level] = (_offset, _offset + _size)
-    _offset += _size
-MULTILEVEL_TOTAL_LABELS = _offset
+MULTILEVEL_LEVEL_ORDER = ("level1", "level2", "level3")
+MultilevelInputSample = Union[MultilevelSample, SingleTextMultilevelSample]
 
 
 LABEL_INPUT_PREFIXES = ("labels", "hard_labels", "soft_labels")
@@ -167,7 +158,7 @@ class TrainingConfig:
 
     # Model configuration
     model_name_or_path: str = "roberta-base"  # or "bert-base-uncased"
-    num_labels: int = NLI_NUM_LABELS
+    num_labels: int = 0
     label_names: Optional[List[str]] = None
 
     # Training hyperparameters
@@ -301,15 +292,17 @@ class MultiLevelSequenceClassifierOutput(ModelOutput):
 
 
 class MultiLevelClassificationModel(nn.Module):
-    """Backbone + one softmax head per DiscoGeM label level."""
+    """Backbone + one softmax head per dataset-defined label level."""
 
     META_FILENAME = "multilevel_classification_meta.json"
 
-    def __init__(self, backbone: nn.Module, hidden_size: int, level_num_labels: Optional[dict[str, int]] = None) -> None:
+    def __init__(self, backbone: nn.Module, hidden_size: int, level_num_labels: dict[str, int]) -> None:
         super().__init__()
         self.backbone = backbone
         self.dropout = nn.Dropout(0.1)
-        self.level_num_labels = level_num_labels or dict(MULTILEVEL_LEVEL_SIZES)
+        if set(level_num_labels) != set(MULTILEVEL_LEVEL_ORDER) or any(size < 2 for size in level_num_labels.values()):
+            raise ValueError("level_num_labels must define at least two labels for level1, level2, and level3.")
+        self.level_num_labels = dict(level_num_labels)
         self.classifiers = nn.ModuleDict(
             {
                 level: nn.Linear(hidden_size, self.level_num_labels[level])
@@ -326,10 +319,14 @@ class MultiLevelClassificationModel(nn.Module):
         config = AutoConfig.from_pretrained(model_name_or_path)
         backbone = AutoModel.from_pretrained(model_name_or_path, config=config)
         hidden_size = int(config.hidden_size)
-        model = cls(backbone=backbone, hidden_size=hidden_size, level_num_labels=level_num_labels)
-
         meta_path = Path(model_name_or_path) / cls.META_FILENAME
         state_path = Path(model_name_or_path) / "multilevel_classification_heads.pt"
+        if level_num_labels is None:
+            if not meta_path.is_file():
+                raise ValueError("level_num_labels is required unless loading a saved multilevel model.")
+            with open(meta_path, encoding="utf-8") as f:
+                level_num_labels = json.load(f).get("level_num_labels")
+        model = cls(backbone=backbone, hidden_size=hidden_size, level_num_labels=level_num_labels)
         if meta_path.exists() and state_path.exists():
             model.load_state_dict(torch.load(state_path, map_location="cpu"))
         return model
@@ -512,14 +509,16 @@ class HLVTrainer:
         self.tokenizer = load_tokenizer_with_fallback(model_name)
 
         if self.config.head_type == "multilevel_classification":
-            level_sizes = self.config.multilevel_label_sizes or tuple(
-                MULTILEVEL_LEVEL_SIZES[level] for level in MULTILEVEL_LEVEL_ORDER
-            )
+            level_sizes = self.config.multilevel_label_sizes
+            if level_sizes is None:
+                raise ValueError("multilevel_label_sizes must come from the dataset manifest.")
             self.model = MultiLevelClassificationModel.from_pretrained(
                 model_name,
                 level_num_labels={level: size for level, size in zip(MULTILEVEL_LEVEL_ORDER, level_sizes)},
             )
         else:
+            if self.config.num_labels < 2:
+                raise ValueError("num_labels must come from the dataset manifest and be at least 2.")
             model_kwargs = {"num_labels": self.config.num_labels}
             if self.config.head_type == "multilabel_classification":
                 model_kwargs["problem_type"] = "multi_label_classification"
@@ -530,8 +529,8 @@ class HLVTrainer:
 
     def prepare_dataset(
         self,
-        train_samples: List[Union[TextPairClassificationSample, TextPairDistributionSample, SingleTextClassificationSample, SingleTextDistributionSample, MultilevelSample]],
-        eval_samples: Optional[List[Union[TextPairClassificationSample, TextPairDistributionSample, SingleTextClassificationSample, SingleTextDistributionSample, MultilevelSample]]] = None,
+        train_samples: List[Union[TextPairClassificationSample, TextPairDistributionSample, SingleTextClassificationSample, SingleTextDistributionSample, SingleTextMultilabelDistributionSample, MultilevelInputSample]],
+        eval_samples: Optional[List[Union[TextPairClassificationSample, TextPairDistributionSample, SingleTextClassificationSample, SingleTextDistributionSample, SingleTextMultilabelDistributionSample, MultilevelInputSample]]] = None,
     ) -> Tuple[Dataset, Optional[Dataset]]:
         if self.tokenizer is None:
             raise ValueError("Must call initialize_model() first")
@@ -567,7 +566,7 @@ class HLVTrainer:
                 labels.append([float(x) for x in s.human_dist])
             return labels
 
-        def extract_multilevel_labels(samples: List[MultilevelSample], use_soft: bool) -> dict[str, List]:
+        def extract_multilevel_labels(samples: List[MultilevelInputSample], use_soft: bool) -> dict[str, List]:
             label_columns: dict[str, List] = {}
             prefix = "soft_labels" if use_soft else "hard_labels"
             for level in MULTILEVEL_LEVEL_ORDER:
@@ -578,7 +577,9 @@ class HLVTrainer:
                         dist = sample.human_dists.get(level)
                         if not dist:
                             raise ValueError(f"Missing {level} human_dist for sample {sample.id}.")
-                        expected = self.config.multilevel_label_sizes[MULTILEVEL_LEVEL_ORDER.index(level)] if self.config.multilevel_label_sizes else MULTILEVEL_LEVEL_SIZES[level]
+                        if self.config.multilevel_label_sizes is None:
+                            raise ValueError("multilevel_label_sizes must come from the dataset manifest.")
+                        expected = self.config.multilevel_label_sizes[MULTILEVEL_LEVEL_ORDER.index(level)]
                         if len(dist) != expected:
                             raise ValueError(
                                 f"Expected {level} human_dist length {expected}, got {len(dist)} for sample {sample.id}."
@@ -603,22 +604,23 @@ class HLVTrainer:
                 return [s.label for s in samples]
             return extract_soft_labels(samples)
 
-        def build_dataset(samples: List[Union[TextPairClassificationSample, TextPairDistributionSample, SingleTextClassificationSample, SingleTextDistributionSample, MultilevelSample]]) -> Dataset:
+        def build_dataset(samples: List[Union[TextPairClassificationSample, TextPairDistributionSample, SingleTextClassificationSample, SingleTextDistributionSample, SingleTextMultilabelDistributionSample, MultilevelInputSample]]) -> Dataset:
             data = {
-                "text_a": [s.text_a if isinstance(s, TextPairClassificationSample) else s.text if isinstance(s, (SingleTextClassificationSample, SingleTextMultilabelDistributionSample)) else s.premise for s in samples],
-                "text_b": [s.text_b if isinstance(s, TextPairClassificationSample) else "" if isinstance(s, (SingleTextClassificationSample, SingleTextMultilabelDistributionSample)) else s.hypothesis for s in samples],
+                "text_a": [s.text_a if isinstance(s, (TextPairClassificationSample, MultilevelSample)) else s.text for s in samples],
+                "text_b": [s.text_b if isinstance(s, (TextPairClassificationSample, MultilevelSample)) else "" for s in samples],
             }
             if self.config.head_type == "multilevel_classification":
-                if not samples or not isinstance(samples[0], MultilevelSample):
-                    raise ValueError("Multilevel heads require MultilevelSample inputs.")
-                data.update(extract_multilevel_labels([s for s in samples if isinstance(s, MultilevelSample)], self.config.use_soft_labels))
+                if not samples or not isinstance(samples[0], (MultilevelSample, SingleTextMultilevelSample)):
+                    raise ValueError("Multilevel heads require multilevel sample inputs.")
+                multilevel_samples = [s for s in samples if isinstance(s, (MultilevelSample, SingleTextMultilevelSample))]
+                data.update(extract_multilevel_labels(multilevel_samples, self.config.use_soft_labels))
                 rel_training = self.config.use_soft_labels and self.config.soft_label_loss == "rel"
                 if self.config.use_soft_eval_metrics or rel_training:
                     # Keep both columns: compute_loss reads hard labels, while
                     # label_names makes the soft labels available to metrics.
                     # ReL starts with soft columns above, so add the hard
                     # labels required by its training/evaluation loss.
-                    data.update(extract_multilevel_labels([s for s in samples if isinstance(s, MultilevelSample)], not self.config.use_soft_labels))
+                    data.update(extract_multilevel_labels(multilevel_samples, not self.config.use_soft_labels))
             else:
                 data["labels"] = extract_labels(samples)  # type: ignore[arg-type]
                 if self.config.use_soft_eval_metrics:
@@ -658,7 +660,7 @@ class HLVTrainer:
                 raise ValueError("ReL requires at least one multilabel annotation set.")
             return Dataset.from_dict({"text_a": text_a, "text_b": [""] * len(text_a), "labels": labels}).map(tokenize_function, batched=True)
 
-        def build_multilevel_rel_dataset(samples: List[MultilevelSample]) -> Dataset:
+        def build_multilevel_rel_dataset(samples: List[MultilevelInputSample]) -> Dataset:
             text_a: List[str] = []
             text_b: List[str] = []
             label_columns = {f"hard_labels_{level}": [] for level in MULTILEVEL_LEVEL_ORDER}
@@ -676,8 +678,8 @@ class HLVTrainer:
                 if any(len(labels) != vote_count for labels in level_votes[1:]):
                     raise ValueError(f"Multilevel annotation_votes must have the same count at every level for sample {sample.id}.")
                 for vote_index in range(vote_count):
-                    text_a.append(sample.premise)
-                    text_b.append(sample.hypothesis)
+                    text_a.append(sample.text if isinstance(sample, SingleTextMultilevelSample) else sample.text_a)
+                    text_b.append("" if isinstance(sample, SingleTextMultilevelSample) else sample.text_b)
                     for level, labels in zip(MULTILEVEL_LEVEL_ORDER, level_votes):
                         label_columns[f"hard_labels_{level}"].append(int(labels[vote_index]))
             if not text_a:
@@ -688,7 +690,7 @@ class HLVTrainer:
 
         if self.config.soft_label_loss == "rel":
             if self.config.head_type == "multilevel_classification":
-                train_dataset = build_multilevel_rel_dataset([sample for sample in train_samples if isinstance(sample, MultilevelSample)])
+                train_dataset = build_multilevel_rel_dataset([sample for sample in train_samples if isinstance(sample, (MultilevelSample, SingleTextMultilevelSample))])
             elif self.config.head_type == "multilabel_classification":
                 train_dataset = build_multilabel_rel_dataset([sample for sample in train_samples if isinstance(sample, SingleTextMultilabelDistributionSample)])
             else:
@@ -704,8 +706,8 @@ class HLVTrainer:
 
     def train(
         self,
-        train_samples: List[Union[TextPairClassificationSample, TextPairDistributionSample, SingleTextClassificationSample, SingleTextDistributionSample, MultilevelSample]],
-        eval_samples: Optional[List[Union[TextPairClassificationSample, TextPairDistributionSample, SingleTextClassificationSample, SingleTextDistributionSample, MultilevelSample]]] = None,
+        train_samples: List[Union[TextPairClassificationSample, TextPairDistributionSample, SingleTextClassificationSample, SingleTextDistributionSample, SingleTextMultilabelDistributionSample, MultilevelInputSample]],
+        eval_samples: Optional[List[Union[TextPairClassificationSample, TextPairDistributionSample, SingleTextClassificationSample, SingleTextDistributionSample, SingleTextMultilabelDistributionSample, MultilevelInputSample]]] = None,
     ) -> None:
         if self.model is None or self.tokenizer is None:
             self.initialize_model()
@@ -846,9 +848,9 @@ class HLVTrainer:
         if multilevel_class_meta.exists():
             with open(multilevel_class_meta, "r", encoding="utf-8") as f:
                 meta = json.load(f)
-            level_num_labels = meta.get("level_num_labels") or {
-                level: MULTILEVEL_LEVEL_SIZES[level] for level in MULTILEVEL_LEVEL_ORDER
-            }
+            level_num_labels = meta.get("level_num_labels")
+            if level_num_labels is None:
+                raise ValueError("Saved multilevel model metadata is missing level_num_labels.")
             self.model = MultiLevelClassificationModel.from_pretrained(
                 str(model_dir),
                 level_num_labels={level: int(level_num_labels[level]) for level in MULTILEVEL_LEVEL_ORDER},

@@ -15,7 +15,13 @@ from typing import Any, Dict, List
 
 import torch
 
-from hlv_toolkits.data import SingleTextClassificationJSONLReader, SingleTextMultilabelJSONLReader, TextPairClassificationJSONLReader, TextPairMultilevelJSONLReader
+from hlv_toolkits.data import (
+    SingleTextClassificationJSONLReader,
+    SingleTextMultilabelJSONLReader,
+    SingleTextMultilevelJSONLReader,
+    TextPairClassificationJSONLReader,
+    TextPairMultilevelJSONLReader,
+)
 from hlv_toolkits.data.schemas import PredictionRecord
 from hlv_toolkits.models.trainer import (
     MULTILEVEL_LEVEL_ORDER,
@@ -178,6 +184,10 @@ def main() -> None:
         samples = SingleTextClassificationJSONLReader(args.data_dir).load_split(args.split)
     elif data_format == "single_text_multilabel_annotation_distribution":
         samples = SingleTextMultilabelJSONLReader(args.data_dir).load_split(args.split)
+    elif data_format == "text_pair_multilevel_label_distribution":
+        samples = TextPairMultilevelJSONLReader(args.data_dir).load_split(args.split)
+    elif data_format == "single_text_multilevel_label_distribution":
+        samples = SingleTextMultilevelJSONLReader(args.data_dir).load_split(args.split)
     else:
         raise ValueError(f"Unsupported prediction format: {data_format!r}")
 
@@ -195,8 +205,7 @@ def main() -> None:
             premises = [s.text for s in batch_samples]
             hypotheses = None
         else:
-            premises = [s.premise for s in batch_samples]
-            hypotheses = [s.hypothesis for s in batch_samples]
+            raise TypeError(f"Unsupported sample type: {type(batch_samples[0]).__name__}")
 
         batch_outputs = predict_batch(
             model,

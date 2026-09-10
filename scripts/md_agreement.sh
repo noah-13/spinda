@@ -14,7 +14,6 @@ SWEEP_SCRIPT="${SWEEP_SCRIPT:-scripts/run_single_text_sweep.sh}"
 RUN_NAME="${RUN_NAME:-default}"
 FORCE_PREPARE="${FORCE_PREPARE:-0}"
 
-uv run python -m hlv_toolkits.scripts.download_data md_agreement --md-agreement-dir "$INPUT_DIR"
 # Regenerate manifests written by older releases: they lacked the direct-path
 # fields required by the generic training configuration contract.
 if [[ "$FORCE_PREPARE" == "1" || ! -s "$DATA_DIR/dataset.json" ]] \

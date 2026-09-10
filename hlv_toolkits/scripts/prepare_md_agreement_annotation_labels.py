@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from hlv_toolkits.scripts.download_data import download_md_agreement
+
 
 def _annotation_votes(row: dict[str, Any], source: Path, item_id: str) -> list[int]:
     raw = row.get("annotations")
@@ -68,6 +70,7 @@ def main() -> None:
     parser.add_argument("--input-dir", type=Path, default=Path("data/external/md_agreement"))
     parser.add_argument("--output-dir", type=Path, default=Path("data/processed/single_text/md_agreement"))
     args = parser.parse_args()
+    download_md_agreement(args.input_dir)
     prepare_md_agreement(args.input_dir, args.output_dir)
 
 
