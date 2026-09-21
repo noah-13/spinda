@@ -12,6 +12,10 @@ import zipfile
 from pathlib import Path
 
 CHAOSNLI_URL = os.environ.get("CHAOSNLI_URL", "https://www.dropbox.com/s/h4j7dqszmpt2679/chaosNLI_v1.0.zip?dl=1")
+CHAOSNLI_MIRROR_BASE_URL = os.environ.get(
+    "CHAOSNLI_MIRROR_BASE_URL",
+    "https://raw.githubusercontent.com/jsbaan/calibration-on-disagreement-data/main/data/chaosNLI_v1.0",
+)
 DISCOGEM_URL = os.environ.get("DISCOGEM_URL", "https://raw.githubusercontent.com/merelscholman/DiscoGeM/main/DiscoGeM%202.0/DiscoGeM2.0_annotation.tgz")
 MD_AGREEMENT_BASE_URL = os.environ.get("MD_AGREEMENT_BASE_URL", "https://raw.githubusercontent.com/Le-Wi-Di/le-wi-di.github.io/main/LeWiDi_2-2023/MD-Agreement_dataset")
 MULTIPICO_BASE_URL = os.environ.get("MULTIPICO_BASE_URL", "https://raw.githubusercontent.com/Le-Wi-Di/le-wi-di.github.io/main/LeWiDi_3-2025/MP")
@@ -24,8 +28,12 @@ def _download(url: str) -> bytes:
 
 def download_chaosnli(output_dir: Path) -> None:
     required = [output_dir / name for name in ("chaosNLI_snli.jsonl", "chaosNLI_mnli_m.jsonl")]
-    if not all(path.exists() for path in required):
-        output_dir.mkdir(parents=True, exist_ok=True)
+    if all(path.exists() for path in required):
+        print(f"ChaosNLI archive files already exist in {output_dir}; skipping download")
+        return
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    try:
         with zipfile.ZipFile(io.BytesIO(_download(CHAOSNLI_URL))) as archive:
             names = {Path(name).name: name for name in archive.namelist()}
             missing = [path.name for path in required if path.name not in names]
@@ -34,9 +42,18 @@ def download_chaosnli(output_dir: Path) -> None:
             for target in required:
                 with archive.open(names[target.name]) as source, target.open("wb") as dest:
                     shutil.copyfileobj(source, dest)
-        print(f"Downloaded ChaosNLI -> {output_dir}")
-    else:
-        print(f"ChaosNLI archive files already exist in {output_dir}; skipping download")
+        print(f"Downloaded ChaosNLI from the official archive -> {output_dir}")
+        return
+    except (OSError, zipfile.BadZipFile) as error:
+        print(f"Official ChaosNLI archive unavailable ({error}); using the public research mirror.")
+
+    for target in required:
+        payload = _download(f"{CHAOSNLI_MIRROR_BASE_URL}/{target.name}")
+        with tempfile.NamedTemporaryFile(dir=output_dir, delete=False) as tmp:
+            tmp.write(payload)
+            temporary_path = Path(tmp.name)
+        temporary_path.replace(target)
+    print(f"Downloaded ChaosNLI from the public research mirror -> {output_dir}")
 
 def download_discogem(output_path: Path) -> None:
     if output_path.exists():

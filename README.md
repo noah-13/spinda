@@ -38,7 +38,10 @@ data/datasets/text_pair/chaosnli/mnli_m/0/
 ### Prepare the data
 
 Download the raw release and convert the MNLI-M fold into SPInDa's dataset
-format:
+format. The downloader tries the official ChaosNLI archive first and falls back
+to a public research mirror containing the same original JSONL files when the
+upstream Dropbox link is unavailable; use remains subject to ChaosNLI's original
+license.
 
 ```bash
 uv run spinda download chaosnli
