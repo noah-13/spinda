@@ -59,7 +59,7 @@ def _download_rows() -> list[dict[str, Any]]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Download and prepare MFRC multi-label annotation distributions")
-    parser.add_argument("--output-dir", type=Path, default=Path("data/processed/single_text/mfrc"))
+    parser.add_argument("--output-dir", type=Path, default=Path("data/datasets/single_text/mfrc"))
     args = parser.parse_args()
     counts = prepare_mfrc(_download_rows(), args.output_dir)
     print(f"MFRC: train={counts['train']} dev={counts['dev']} test={counts['test']}")

@@ -117,8 +117,8 @@ def prepare_humans_and_domains(input_dir: Path, single_text_root: Path, units: t
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Prepare official Humans-and-Domains/TGeGUM annotations")
-    parser.add_argument("--input-dir", type=Path, default=Path("data/external/humans_and_domains"))
-    parser.add_argument("--single-text-output-root", type=Path, default=Path("data/processed/single_text"))
+    parser.add_argument("--input-dir", type=Path, default=Path("data/raw/humans_and_domains"))
+    parser.add_argument("--single-text-output-root", type=Path, default=Path("data/datasets/single_text"))
     parser.add_argument("--units", nargs="+", choices=UNITS, default=list(UNITS))
     args = parser.parse_args()
     download_humans_and_domains(args.input_dir)

@@ -2,7 +2,8 @@
 
 This page lists every user-facing option exposed by the training, prediction,
 and evaluation commands. Training settings may be supplied as command-line
-arguments or in JSON files passed through `--config`.
+arguments or in JSON files passed through `--config`. The training target type
+is determined only by `label_mode`; there is no separate soft-label switch.
 
 ## Configuration precedence
 
@@ -38,7 +39,6 @@ reader.
 |---|---|---|---|
 | `model` / `--model` | Hugging Face model ID or local checkpoint path | `roberta-base` | Pretrained encoder to fine-tune. |
 | `label_training_strategy` / `--label_training_strategy` | `ce`, `mse`, `jsd`, `rel` | `ce` | Loss: cross-entropy, MSE, Jensen--Shannon divergence, or repeated-label learning. |
-| `use_soft_labels` / `--use_soft_labels`, `--no-use_soft_labels` | Boolean | `null` | Requests soft-target training; supported readers resolve the final value from `label_mode`. |
 | `soft_label_metric_for_best_model` / `--soft_label_metric_for_best_model` | `accuracy`, `tvd`, `kl_divergence`, `soft_micro_f1`, `soft_macro_f1` | `tvd` | Development selection metric for categorical soft-label tasks. |
 | `multilabel_metric_for_best_model` / `--multilabel_metric_for_best_model` | `accuracy`, `soft_micro_f1`, `soft_macro_f1`, `multilabel_pojsd`, `multilabel_entropy_correlation` | `soft_micro_f1` | Development selection metric for multi-label tasks. |
 
@@ -96,6 +96,16 @@ See [prediction_contract.md](prediction_contract.md) for output JSON schemas.
 | `--disagreement_boundaries` | One or more floats | `null` | Explicit normalized-entropy cutoffs; provide `groups - 1` values. |
 | `--analysis-output-file` | JSON path or `null` | Next to evaluation output | Aggregate disagreement-analysis path. |
 | `--instance-errors-file` | CSV path or `null` | Next to analysis output | Per-instance error-table path. |
+
+## Paper-standard analysis plots
+
+After producing categorical evaluation artifacts with `evaluate --analysis`, run
+`spinda analyze` with matching analysis JSON files, instance-error CSV files,
+and labels. It accepts repeated labels for multiple seeds and creates the two
+paper-standard Section 4.4 figures in PNG and PDF: entropy-tertile TVD with
+standard-deviation error bars, and instance-level TVD box plots. The command
+requires the default three entropy groups; pass `--level` for one
+multi-dimensional annotation level.
 
 ## Advanced and runtime options
 

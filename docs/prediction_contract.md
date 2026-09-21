@@ -19,7 +19,7 @@ For example, to evaluate an external model on ChaosNLI:
 ```bash
 uv run python -m hlv_toolkits.scripts.evaluate \
   --predictions external_predictions.json \
-  --data_dir data/processed/text_pair/chaosnli/snli/0 \
+  --data_dir data/datasets/text_pair/chaosnli/snli/0 \
   --ground_truth_split test \
   --output_file results/external_model.json
 ```

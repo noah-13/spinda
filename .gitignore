@@ -1,7 +1,9 @@
 # data
-data/external/
-data/processed/
-data/cache/
+data/raw/**
+!data/raw/.gitkeep
+data/datasets/**
+!data/datasets/.gitkeep
+.cache/spinda/
 
 # Virtual environments
 .venv/

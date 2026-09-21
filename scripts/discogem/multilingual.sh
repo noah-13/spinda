@@ -13,7 +13,7 @@ MODEL_SPECS="${MODEL_SPECS:-xlm-roberta-base;bert-base-multilingual-cased;micros
 if [[ -n "${LEVEL:-}" ]]; then LEVELS=("$LEVEL"); else LEVELS=(level1 level2 level3); fi
 
 for level in "${LEVELS[@]}"; do
-  DATASET_CONFIG="data/processed/text_pair/discogem/multilingual/$level/dataset.json"
+  DATASET_CONFIG="data/datasets/text_pair/discogem/multilingual/$level/dataset.json"
   if [[ ! -s "$DATASET_CONFIG" ]]; then
     uv run python -m hlv_toolkits.scripts.prepare_discogem_annotation_labels --variants multilingual
   fi

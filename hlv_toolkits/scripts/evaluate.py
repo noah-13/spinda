@@ -5,7 +5,7 @@ Evaluation script for HLV predictions.
 Example usage:
     uv run python -m hlv_toolkits.scripts.evaluate\
         --predictions outputs/predictions/toolkit_preds.json\
-        --data_dir data/processed/text_pair/chaosnli
+        --data_dir data/datasets/text_pair/chaosnli
 """
 
 import argparse

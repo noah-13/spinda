@@ -154,13 +154,6 @@ def main() -> None:
         help="Maximum sequence length for tokenization (set to 0 to use the model limit)",
     )
 
-    # Soft-label training settings
-    parser.add_argument(
-        "--use_soft_labels",
-        action=argparse.BooleanOptionalAction,
-        default=None,
-        help="Train with distribution targets (requires data with human label distributions)",
-    )
     parser.add_argument(
         "--label_training_strategy",
         dest="soft_label_loss",
@@ -297,8 +290,6 @@ def main() -> None:
         )
         num_labels = len(reader.labels)
         label_names = reader.labels
-        if args.use_soft_labels is not None and args.use_soft_labels != reader.use_soft_labels:
-            warnings.warn("--use_soft_labels is overridden by the resolved dataset label_mode.", UserWarning, stacklevel=2)
         args.use_soft_labels = reader.use_soft_labels
         train_samples = reader.load_train()
         if reader.has_dev:

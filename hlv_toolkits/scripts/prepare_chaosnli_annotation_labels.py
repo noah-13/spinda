@@ -140,8 +140,8 @@ def _split_kfold_train_dev_test(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Convert ChaosNLI SNLI to annotation_labels text-pair JSON.")
-    parser.add_argument("--input_dir", type=Path, default=Path("data/external/chaosnli"))
-    parser.add_argument("--output_dir", type=Path, default=Path("data/processed/text_pair/chaosnli"))
+    parser.add_argument("--input_dir", type=Path, default=Path("data/raw/chaosnli"))
+    parser.add_argument("--output_dir", type=Path, default=Path("data/datasets/text_pair/chaosnli"))
     parser.add_argument(
         "--subsets",
         nargs="+",

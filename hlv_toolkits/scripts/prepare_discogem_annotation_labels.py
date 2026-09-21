@@ -192,9 +192,9 @@ def _write_multilevel_variant(rows: list[dict[str, str]], output_root: Path, var
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Download and prepare paper-compatible DiscoGeM datasets.")
-    parser.add_argument("--discogem-path", type=Path, default=Path("data/external/DiscoGeM/DiscoGeM 2.0/DiscoGeM2.0_annotation.tgz"))
-    parser.add_argument("--output-dir", type=Path, default=Path("data/processed/text_pair"))
-    parser.add_argument("--multilevel-output-dir", type=Path, default=Path("data/processed/text_pair"), help="Root for the multilevel_label_distribution export.")
+    parser.add_argument("--discogem-path", type=Path, default=Path("data/raw/DiscoGeM/DiscoGeM 2.0/DiscoGeM2.0_annotation.tgz"))
+    parser.add_argument("--output-dir", type=Path, default=Path("data/datasets/text_pair"))
+    parser.add_argument("--multilevel-output-dir", type=Path, default=Path("data/datasets/text_pair"), help="Root for the multilevel_label_distribution export.")
     parser.add_argument("--skip-multilevel", action="store_true", help="Only write the single-level text-pair exports.")
     parser.add_argument("--variants", nargs="+", choices=("english", "multilingual"), default=("english", "multilingual"))
     args = parser.parse_args()

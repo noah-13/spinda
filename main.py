@@ -37,11 +37,12 @@ def main() -> None:
         "predict": "hlv_toolkits.scripts.predict",
         "evaluate": "hlv_toolkits.scripts.evaluate",
         "download": "hlv_toolkits.scripts.download_data",
+        "analyze": "hlv_toolkits.scripts.analyze",
     }
     module_name = commands.get(command)
     if module_name is None:
         print(f"Unknown command: {command}")
-        print("Available commands: train, predict, evaluate, download")
+        print("Available commands: train, predict, evaluate, download, analyze")
         sys.exit(1)
 
     # Delay imports so ``python main.py`` remains informative even on machines

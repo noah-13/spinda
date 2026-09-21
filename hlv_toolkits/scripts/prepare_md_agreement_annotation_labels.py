@@ -66,8 +66,8 @@ def prepare_md_agreement(input_dir: Path, output_dir: Path) -> dict[str, int]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Prepare MD-Agreement annotation-vote JSON files")
-    parser.add_argument("--input-dir", type=Path, default=Path("data/external/md_agreement"))
-    parser.add_argument("--output-dir", type=Path, default=Path("data/processed/single_text/md_agreement"))
+    parser.add_argument("--input-dir", type=Path, default=Path("data/raw/md_agreement"))
+    parser.add_argument("--output-dir", type=Path, default=Path("data/datasets/single_text/md_agreement"))
     args = parser.parse_args()
     download_md_agreement(args.input_dir)
     prepare_md_agreement(args.input_dir, args.output_dir)

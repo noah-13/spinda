@@ -19,8 +19,8 @@ Start with [the paper reproduction guide](docs/reproducing_paper.md), [the confi
 The default data locations are:
 
 ```text
-data/external/DiscoGeM/DiscoGeM 2.0/
-data/processed/
+data/raw/DiscoGeM/DiscoGeM 2.0/
+data/datasets/
 ```
 
 ## Quick start: ChaosNLI
@@ -37,34 +37,66 @@ The default configuration trains six models with seeds 42, 43, and 44. Final mod
 
 Future datasets should follow the same pattern: one dataset launcher and a short README subsection.
 
-## Prediction and evaluation
+## Prediction, evaluation, and paper analysis
 
-Predictions from this toolkit and external models use the same JSON contract.
-`predict` is for checkpoints trained by this repository; `evaluate` is
-model-agnostic and accepts any prediction file that follows the contract.
-Evaluation accepts either the processed dataset directory (including
-`dataset.json`) or a lightweight external ground-truth JSON file. See
-[docs/prediction_contract.md](docs/prediction_contract.md) for the required
-fields, optional ignored metadata, and external-model examples.
+SPINDA separates prediction, evaluation, and analysis. `predict` creates the
+shared prediction JSON/JSONL contract from a SPINDA checkpoint. `evaluate` is
+model-agnostic: it accepts that contract from SPINDA or an external model and
+compares it with either a prepared dataset directory or an external ground
+truth file. The full schema is in [docs/prediction_contract.md](docs/prediction_contract.md).
 
-See [docs/configuration_reference.md](docs/configuration_reference.md) for all training, prediction, evaluation, and analysis options.
+### Evaluate one checkpoint
 
-
-For categorical soft-label data, add `--analysis` to write an entropy-stratified
-report and a CSV with TVD, JSD, KL, cross-entropy, and L2 error for every
-instance. The default low/medium/high groups use empirical entropy tertiles.
-Use `--disagreement-groups N` for N quantile groups, or provide explicit
-normalized-entropy cutoffs with `--disagreement-boundaries`:
+Run evaluation with `--analysis` for categorical HLV data. This writes the
+ordinary metric table, a disagreement report, and one sortable error record per
+instance. `--no-plot` skips the generic TVD and ternary diagnostics when the
+paper-standard plots below are the intended output.
 
 ```bash
-uv run python -m hlv_toolkits.scripts.evaluate \
-  --predictions outputs/predictions.json --data_dir data/processed/text_pair/chaosnli \
-  --analysis --disagreement-boundaries 0.33 0.67
+uv run spinda evaluate \
+  --predictions outputs/chaosnli/mnli_m/fold_0/roberta-base__soft__rel/seed_42/test/predictions.jsonl \
+  --data_dir data/datasets/text_pair/chaosnli/mnli_m/0 \
+  --analysis --no-plot \
+  --output_file outputs/example/evaluation.json
 ```
 
-The analysis JSON contains group-level accuracy and mean distribution errors;
-the adjacent `__instance_errors.csv` supports sorting and filtering the
-individual model--human mismatches.
+This produces:
+
+- `evaluation.json`: aggregate accuracy and distribution-aware metrics.
+- `evaluation__analysis.json`: TVD and related metrics for low, medium, and
+  high human-disagreement groups. The groups are empirical human-entropy
+  tertiles, matching the paper.
+- `evaluation__analysis__instance_errors.csv`: per-example entropy, predicted
+  and majority labels, correctness, and TVD/JSD/KL/CE/L2 errors.
+
+`--disagreement-groups` and `--disagreement-boundaries` are useful exploratory
+options, but paper-standard figures require the default three tertiles.
+
+### Compare strategies and draw the paper figures
+
+Evaluate every seed of each strategy first, then use `spinda analyze` to pool
+the matching JSON and CSV artifacts. Repeat each strategy name in `--labels`
+for its seed runs. The complete six-input Hard CE vs ReL command is in
+[docs/reproducing_paper.md](docs/reproducing_paper.md#paper-standard-disagreement-figures).
+
+```bash
+uv run spinda analyze --analysis-files SEED_ANALYSIS_JSONS \
+  --instance-errors-files SEED_INSTANCE_ERROR_CSVS \
+  --labels Hard_CE Hard_CE Hard_CE ReL ReL ReL \
+  --output-dir outputs/paper_analysis
+```
+
+The command writes PNG and PDF versions of two paper-standard plots: an
+entropy-tertile TVD comparison with cross-seed standard-deviation error bars,
+and a per-instance TVD violin plot with an embedded IQR box, median, and mean.
+
+| Disagreement-stratified TVD | Instance-level TVD |
+| --- | --- |
+| ![TVD by disagreement level](docs/assets/disagreement_tvd_example.png) | ![Instance-level TVD violin plot](docs/assets/instance_tvd_violin_example.png) |
+
+See [docs/configuration_reference.md](docs/configuration_reference.md) for all
+CLI options and [docs/hlv_metrics_tutorial.md](docs/hlv_metrics_tutorial.md)
+for metric definitions.
 
 ## Models and training heads
 
@@ -192,7 +224,7 @@ MultiPICo is downloaded from the official LeWiDi MP release, which provides
 the benchmark train/dev/test split (12,017 / 3,005 / 3,756 conversations).
 The exporter preserves each conversation's original annotator votes and writes
 a soft `text_pair_label_distribution` dataset to
-`data/processed/text_pair/multipico/`.
+`data/datasets/text_pair/multipico/`.
 
 ```bash
 GPU=0 bash scripts/multipico/multilingual.sh
@@ -206,7 +238,7 @@ development-set TVD.
 
 ## Humans-and-Domains / TGeGUM
 
-The official sentence-level TGeGUM splits are exported as three independent soft-label tasks (`genre`, `topic1`, and `topic2`) under `data/processed/single_text/humans_and_domains/`, plus one shared three-head experiment under `data/processed/single_text/humans_and_domains/multidimensional/`. The latter maps `level1=genre`, `level2=topic1`, and `level3=topic2`; only the two topic heads form a true hierarchy. All runs select checkpoints with development-set TVD.
+The official sentence-level TGeGUM splits are exported as three independent soft-label tasks (`genre`, `topic1`, and `topic2`) under `data/datasets/single_text/humans_and_domains/`, plus one shared three-head experiment under `data/datasets/single_text/humans_and_domains/multidimensional/`. The latter maps `level1=genre`, `level2=topic1`, and `level3=topic2`; only the two topic heads form a true hierarchy. All runs select checkpoints with development-set TVD.
 
 ```bash
 GPU=0 bash scripts/humans_and_domains.sh
@@ -240,3 +272,8 @@ scripts/
 - Model checkpoints are written below the selected run directory, usually under `seed_<seed>/`.
 - Keep the training label level, language, head, and loss consistent between training, prediction, and evaluation.
 - W&B logging is opt-in for the generic CLI and enabled by the DiscoGeM screening wrappers.
+
+
+For the paper-standard figures, use spinda analyze to combine the JSON and CSV
+artifacts from multiple evaluate --analysis runs. It produces the two Section
+4.4 plots in PNG and PDF.

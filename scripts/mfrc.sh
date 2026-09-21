@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/interrupt_cleanup.sh"
 cd "$SCRIPT_DIR/.."
 
-DATA_DIR="${MFRC_OUTPUT_DIR:-data/processed/single_text/mfrc}"
+DATA_DIR="${MFRC_OUTPUT_DIR:-data/datasets/single_text/mfrc}"
 OUT_ROOT="${OUT_ROOT:-outputs/mfrc}"
 TRAINING_CONFIG="${TRAINING_CONFIG:-configs/training.json}"
 SWEEP_SCRIPT="${SWEEP_SCRIPT:-scripts/run_single_text_sweep.sh}"

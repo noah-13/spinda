@@ -104,9 +104,9 @@ def _load_splits(input_dir: Path) -> dict[str, Mapping[str, Mapping[str, Any]]]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Prepare official MultiPICo annotation distributions")
-    parser.add_argument("--input-dir", type=Path, default=Path("data/external/multipico"))
+    parser.add_argument("--input-dir", type=Path, default=Path("data/raw/multipico"))
     parser.add_argument("--language", default=None, help="Only export one ISO language code, e.g. en.")
-    parser.add_argument("--output-dir", type=Path, default=Path("data/processed/text_pair/multipico"))
+    parser.add_argument("--output-dir", type=Path, default=Path("data/datasets/text_pair/multipico"))
     args = parser.parse_args()
     download_multipico(args.input_dir)
     counts = prepare_multipico(_load_splits(args.input_dir), args.output_dir, args.language)

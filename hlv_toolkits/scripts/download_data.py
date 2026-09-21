@@ -96,11 +96,11 @@ def download_humans_and_domains(output_dir: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Download raw datasets")
     parser.add_argument("source", choices=["chaosnli", "discogem", "md_agreement", "multipico", "humans_and_domains"])
-    parser.add_argument("--chaosnli-dir", type=Path, default=Path("data/external/chaosnli"))
-    parser.add_argument("--discogem-path", type=Path, default=Path("data/external/DiscoGeM/DiscoGeM 2.0/DiscoGeM2.0_annotation.tgz"))
-    parser.add_argument("--md-agreement-dir", type=Path, default=Path("data/external/md_agreement"))
-    parser.add_argument("--multipico-dir", type=Path, default=Path("data/external/multipico"))
-    parser.add_argument("--humans-and-domains-dir", type=Path, default=Path("data/external/humans_and_domains"))
+    parser.add_argument("--chaosnli-dir", type=Path, default=Path("data/raw/chaosnli"))
+    parser.add_argument("--discogem-path", type=Path, default=Path("data/raw/DiscoGeM/DiscoGeM 2.0/DiscoGeM2.0_annotation.tgz"))
+    parser.add_argument("--md-agreement-dir", type=Path, default=Path("data/raw/md_agreement"))
+    parser.add_argument("--multipico-dir", type=Path, default=Path("data/raw/multipico"))
+    parser.add_argument("--humans-and-domains-dir", type=Path, default=Path("data/raw/humans_and_domains"))
     args = parser.parse_args()
     if args.source == "chaosnli":
         download_chaosnli(args.chaosnli_dir)

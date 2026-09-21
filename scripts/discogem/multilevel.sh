@@ -16,11 +16,11 @@ RUN_SPECS="${RUN_SPECS:-soft ce;soft mse;soft jsd;soft rel;soft_to_hard ce}"
 for variant in $VARIANTS; do
   case "$variant" in
     english)
-      dataset_config="data/processed/text_pair/discogem/english/multilevel/dataset.json"
+      dataset_config="data/datasets/text_pair/discogem/english/multilevel/dataset.json"
       default_models="microsoft/deberta-v3-large;roberta-base;bert-base-uncased;xlm-roberta-base;Twitter/twhin-bert-base;bert-base-multilingual-cased"
       ;;
     multilingual)
-      dataset_config="data/processed/text_pair/discogem/multilingual/multilevel/dataset.json"
+      dataset_config="data/datasets/text_pair/discogem/multilingual/multilevel/dataset.json"
       default_models="xlm-roberta-base;bert-base-multilingual-cased;microsoft/infoxlm-base"
       ;;
     *)
