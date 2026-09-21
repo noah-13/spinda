@@ -1,219 +1,119 @@
-# Data Layout
+# Bring your own data
 
-Keep large, cloned, or generated datasets under this directory.
+This guide describes how to use SPINDA with a dataset of your own. Your data
+may live anywhere; `data/datasets/my_dataset/` is a convenient local default.
+Do not commit large or licensed data files.
 
-Recommended layout:
+The repository's paper launchers manage their own source downloads and
+preprocessing automatically. Run the relevant script in `scripts/` when
+reproducing an experiment; it will use `data/raw/` and `data/datasets/` as
+working locations. Dataset-specific details belong in
+[the paper reproduction guide](../docs/reproducing_paper.md), not here.
 
-Only raw source data and SPINDA-ready datasets live below data/. Runtime cache files belong in .cache/spinda/.
+## A categorical text-pair dataset
 
-```text
-data/
-  raw/
-    chaosnli/
-      chaosNLI_snli.jsonl
-    snli/
-  datasets/
-    snli/
-      train.json
-      dev.json
-      test.json
-    text_pair/
-      chaosnli/
-        0/
-          dataset.json
-          train.json
-          dev.json
-          test.json
-        ...
-        9/
-          dataset.json
-          train.json
-          dev.json
-          test.json
-    discogem.jsonl
-    single_text/
-      md_agreement/
-        dataset.json
-        train.json
-        dev.json
-        test.json
-```
-
-Guidelines:
-
-- Put downloaded or cloned source datasets in `data/raw/`.
-- Put derived splits and intermediate artifacts in `data/datasets/`.
-- Prepare paper-compatible DiscoGeM datasets with `uv run python -m hlv_toolkits.scripts.prepare_discogem_annotation_labels`. It downloads the 2.0 archive if absent, uses `MV_dist` to retain original annotation vote counts, excludes `norel`, and writes separate English and multilingual level1, level2, and level3 directories under `data/datasets/text_pair/discogem/`. It also writes the named `text_pair_multidimensional_label_distribution` format under `data/datasets/text_pair/discogem/{english,multilingual}/multidimensional/`, with all hierarchy levels in each record.
-- The multilingual directories merge `en`, `de`, `fr`, and `cs`; IDs are language-prefixed to remain unique.
-- Put caches, temporary files, and local scratch data in `.cache/spinda/`.
-- Do not commit large dataset files to git.
-
-## Public text-pair classification format
-
-For reusable hard-label text-pair training, preprocess any dataset into one directory:
+For NLI, paraphrase detection, or any task with two input texts, create one
+directory containing a manifest and JSON-array splits:
 
 ```text
-my_dataset/
-  dataset.json
-  train.json
-  dev.json
-  test.json  # optional unless predicting/evaluating test
+data/datasets/my_dataset/
+├── dataset.json
+├── train.json
+├── dev.json
+└── test.json       # needed for prediction or test evaluation
 ```
 
-`dataset.json` fixes the class order and can specify the label mode. Every split file is a top-level JSON array of records. `label_mode: "hard"` uses one integer label per record:
-
-```json
-{"format": "text_pair_label_distribution", "label_mode": "hard", "labels": ["not_duplicate", "duplicate"]}
-```
-
-```json
-{"id": "train-0001", "text_a": "How do I reset my password?", "text_b": "What is the password reset procedure?", "annotation_labels": [1]}
-```
-
-`label_mode: "soft"` uses raw annotation indices and the reader derives the normalized distribution from their counts. A one-vote row is allowed in an explicitly soft dataset and becomes a one-hot distribution; without an explicit soft manifest, one annotation is inferred as a hard-label row.
-
-```json
-{"format": "text_pair_label_distribution", "label_mode": "soft", "labels": ["not_duplicate", "duplicate"]}
-```
-
-```json
-{"id": "train-0001", "text_a": "How do I reset my password?", "text_b": "What is the password reset procedure?", "annotation_labels": [0, 1, 1, 1, 1, 1, 1, 1, 1, 1]}
-```
-
-
-`label_mode: "soft_to_hard"` requires two or more `annotation_labels` and converts their vote counts with argmax. It rejects hard examples; it is the only permitted soft-to-hard conversion.
-
-Only `annotation_labels` affects label parsing. Every other record field, regardless of name (including `meta`, `label`, or `label_distribution`), is ignored. If `label_mode` is omitted, one annotation means hard and two or more means soft, and the reader emits a warning. `labels` may be omitted, in which case the reader infers the class range from the training annotations, uses `label0`, `label1`, ... and emits a warning. Every annotation index must be in `[0, len(labels) - 1]` when labels are provided.
-
-Training uses `label_training_strategy`. The CLI can override the manifest `label_mode`:
-
-- `hard` and `soft_to_hard` permit only `ce`.
-- `soft` permits `ce`, `mse`, `jsd`, or `rel`.
-- `rel` expands every value in `annotation_labels` into a repeated hard-label CE instance.
-
-The model always emits one softmax distribution at inference. Incompatible mode/strategy combinations are errors.
-
-```json
-{"label_mode": "soft", "label_training_strategy": "jsd"}
-```
-
-```bash
---label_mode soft_to_hard
-```
-
-For single-text tasks, use the parallel `single_text_label_distribution` format. Rows have `id`, `text`, and `annotation_labels`; its label-mode semantics are the same as the text-pair format. MD-Agreement uses it because each example is one tweet rather than a pair.
-
-```json
-{"format": "single_text_label_distribution", "label_mode": "soft", "labels": ["not_offensive", "offensive"]}
-```
-
-```json
-{"id": "md_agreement:train:1", "text": "Example tweet", "annotation_labels": [0, 0, 0, 1, 1]}
-```
-
-Train from direct paths. `format` and `train_path` are required; `dev_path` is optional.
+`dataset.json` fixes the class-index order and declares how labels should be
+interpreted. A hard-label binary task, for example, can use:
 
 ```json
 {
   "format": "text_pair_label_distribution",
-  "train_path": "data/my_dataset/train.json",
-  "dev_path": "data/my_dataset/dev.json",
+  "label_mode": "hard",
   "labels": ["not_duplicate", "duplicate"],
-  "label_mode": "soft",
-  "model": "roberta-base",
-  "output_dir": "outputs/my_dataset"
+  "train_path": "data/datasets/my_dataset/train.json",
+  "dev_path": "data/datasets/my_dataset/dev.json"
 }
 ```
 
-Save this as `dataset.json` and run. Shared, dataset-agnostic training defaults may be layered before it; this repository provides `configs/training.json`:
+Every split is a top-level JSON array. Text-pair records require `id`,
+`text_a`, `text_b`, and `annotation_labels`:
 
-```bash
-uv run python -m hlv_toolkits.scripts.train --config configs/training.json dataset.json
+```json
+[
+  {
+    "id": "train-0001",
+    "text_a": "How do I reset my password?",
+    "text_b": "What is the password reset procedure?",
+    "annotation_labels": [1]
+  }
+]
 ```
 
-Or use the manifest alone:
+The integer values in `annotation_labels` refer to the order in `labels`.
+Extra fields are retained as metadata but do not affect label parsing.
+
+## Human-label variation: choose a label mode
+
+Use `annotation_labels` to retain every individual vote. SPINDA derives the
+empirical distribution from the vote counts.
+
+| `label_mode` | Row example | Training target |
+| --- | --- | --- |
+| `hard` | `[1]` | One hard class; only `ce` is valid. |
+| `soft` | `[0, 1, 1, 1]` | Distribution `[0.25, 0.75]`; use `ce`, `mse`, `jsd`, or `rel`. |
+| `soft_to_hard` | `[0, 1, 1, 1]` | Majority-vote hard class; only `ce` is valid, while soft labels remain available for evaluation. |
+
+Declare the mode explicitly. If it is omitted, SPINDA infers `hard` for a
+single vote and `soft` for multiple votes and emits a warning. `rel`
+(repeated-label learning) is useful when the individual annotations—not only
+their normalized aggregate—should affect the objective.
+
+## Train, predict, and evaluate
+
+Layer the shared optimization defaults before the dataset manifest. Later
+configuration files override earlier ones, and explicit CLI options override
+both.
 
 ```bash
-uv run python -m hlv_toolkits.scripts.train --config dataset.json
+uv run spinda train \
+  --config configs/training.json data/datasets/my_dataset/dataset.json \
+  --model roberta-base \
+  --label_training_strategy ce \
+  --seeds 42 43 44 \
+  --output_dir outputs/my_dataset
 ```
 
-`dataset.json` may contain both the dataset fields above and any training
-fields, such as `model`, `num_epochs`, or `learning_rate`. You can also combine
-it with shared training presets in one `--config` invocation:
+Use the saved model for prediction, then evaluate it against the directory that
+contains `dataset.json` and `test.json`:
 
 ```bash
-uv run python -m hlv_toolkits.scripts.train \
-  --config data/my_dataset/dataset.json configs/roberta.json configs/long_run.json
+uv run spinda predict \
+  --model_path outputs/my_dataset/seed_42/final_model \
+  --data_dir data/datasets/my_dataset \
+  --split test \
+  --output_file outputs/my_dataset/seed_42/test/predictions.json
+
+uv run spinda evaluate \
+  --predictions outputs/my_dataset/seed_42/test/predictions.json \
+  --data_dir data/datasets/my_dataset \
+  --analysis \
+  --output_file outputs/my_dataset/seed_42/test/evaluation.json
 ```
 
-JSON files are merged left to right, so each later file overrides matching
-keys from earlier files. Explicit argparse values override every JSON file:
+For an external model, write its predictions in the same contract and run only
+the evaluation command. See the
+[prediction contract](../docs/prediction_contract.md) for the required output
+schema.
 
-```bash
-uv run python -m hlv_toolkits.scripts.train \
-  --config dataset.json configs/roberta.json --num_epochs 10 --no-fp16
-```
+## Other input types
 
-The equivalent direct CLI requires the same two data fields:
+SPINDA also supports single-text, multi-label, and multi-dimensional datasets.
+The categorical single-text format replaces `text_a` and `text_b` with `text`
+and uses `format: "single_text_label_distribution"`; its label-mode semantics
+are identical. The available formats and all training options are listed in the
+[configuration reference](../docs/configuration_reference.md).
 
-```bash
-uv run python -m hlv_toolkits.scripts.train \
-  --format text_pair_label_distribution \
-  --train_path data/my_dataset/train.json \
-  --dev_path data/my_dataset/dev.json \
-  --labels not_duplicate duplicate \
-  --label_mode soft \
-  --model roberta-base --output_dir outputs/my_dataset
-```
-
-If `dev_path` is omitted, training emits a warning, does not evaluate or select a best checkpoint, and writes the last epoch model to `final_model`.
-
-Use `hlv_toolkits.scripts.prepare_discogem_annotation_labels` to download and export the current DiscoGeM datasets. It writes independent `discogem/english/level{1,2,3}` and `discogem/multilingual/level{1,2,3}` soft-label datasets, each with `dataset.json`, `train.json`, `dev.json`, and `test.json`.
-
-
-## MD-Agreement
-
-MD-Agreement is an English single-text offensiveness dataset from LeWiDi 2023. Each tweet has five individual binary judgments. Download and preserve those raw votes, then export the experiment-ready soft-label data with:
-
-```bash
-./scripts/md_agreement.sh
-```
-
-This invokes the versioned Python download step (`hlv_toolkits.scripts.download_data md_agreement`) followed by `hlv_toolkits.scripts.prepare_md_agreement_annotation_labels`. Raw source files remain in `data/raw/md_agreement/`; the output is `data/datasets/single_text/md_agreement/`.
-
-## MFRC
-
-MFRC (Moral Foundations Reddit Corpus) is exported as `single_text_multilabel_annotation_distribution`, because a Reddit comment can receive several moral-foundation labels from one annotator. Its JSON rows retain those per-annotator sets in `annotation_label_sets`; the reader derives independent per-label vote probabilities (they intentionally do not sum to one).
-
-```bash
-bash scripts/mfrc.sh
-```
-
-The launcher prepares the data if needed, then runs the shared model/seeds sweep over `soft ce`, `soft mse`, `soft jsd`, `soft rel`, and `soft_to_hard ce`. Set `MODEL_SPECS`, `RUN_SPECS`, `SEEDS_OVERRIDE`, `GPU`, or `FORCE` as for the other launchers. To prepare only, run `uv run python -m hlv_toolkits.scripts.prepare_mfrc_annotation_labels`.
-
-The exporter downloads `USC-MOLA-Lab/MFRC` through `datasets`, groups the source's one-row-per-annotator records into comments, makes a deterministic 80/10/10 train/dev/test split, and writes `data/datasets/single_text/mfrc/`. Metadata retains subreddit, topical bucket, annotator IDs, and confidence.
-
-### MFRC training
-
-MFRC uses eight independent sigmoid outputs. Use `label_mode: "soft_to_hard"` with `ce` for the per-label majority-vote baseline, or `label_mode: "soft"` with `ce`, `mse`, `jsd`, or `rel`. In MFRC, `ce` is binary cross-entropy; `rel` expands one full multi-hot target per annotator. `soft_to_hard` trains those thresholded hard targets but retains original vote probabilities for dev evaluation. All multilabel-classification runs select the checkpoint with the highest `eval_soft_micro_f1` by default. Use `--multilabel_metric_for_best_model` for direct training or `MULTILABEL_METRIC_FOR_BEST_MODEL` in the shared sweep launcher to override this (for example, `multilabel_pojsd`).
-
-### MFRC prediction and evaluation
-
-Run predictions and standard test evaluation for every completed MFRC seed with:
-
-```bash
-GPU=0 MAX_PARALLEL=8 bash scripts/mfrc_predict_eval_parallel.sh
-```
-
-The launcher shares the one selected physical GPU across prediction jobs, using
-available GPU memory to gate parallel launches. Evaluation begins as soon as its
-prediction completes and runs without plots. It reuses complete artifacts by
-default; set `FORCE=1` to regenerate predictions and evaluations, or
-`FORCE_EVAL=1` to rerun evaluation only.
-
-```bash
-uv run python -m hlv_toolkits.scripts.train \
-  --config data/datasets/single_text/mfrc/dataset.json configs/training.json \
-  --head_type multilabel_classification --label_mode soft \
-  --label_training_strategy jsd --output_dir outputs/mfrc/jsd
-```
+For custom data that does not fit a public format yet, add a reader that emits
+the normalized sample objects in `hlv_toolkits.data.schemas`, then document the
+new format before relying on it in a release.

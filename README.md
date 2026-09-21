@@ -12,8 +12,15 @@ label distributions, multi-label tasks, and multi-dimensional annotations.
 uv sync
 ```
 
-Use `uv run spinda <command>` from the repository root. The main commands are
-`train`, `predict`, `evaluate`, and `analyze`.
+Run commands from the repository root:
+
+| Command | Purpose |
+| --- | --- |
+| `spinda download <source>` | Download a supported raw dataset. |
+| `spinda train` | Fine-tune one or more seed runs. |
+| `spinda predict` | Export predictions from a checkpoint. |
+| `spinda evaluate` | Compute metrics and optional disagreement artifacts. |
+| `spinda analyze` | Aggregate analysis artifacts across seed runs. |
 
 ## Start with ChaosNLI
 
@@ -29,11 +36,26 @@ data/datasets/text_pair/chaosnli/mnli_m/0/
 └── test.json
 ```
 
-The manifest declares the task format and the class order:
+### Prepare the data
+
+Download the raw release and convert the MNLI-M fold into SPINDA's dataset
+format:
+
+```bash
+uv run spinda download chaosnli
+uv run python -m hlv_toolkits.scripts.prepare_chaosnli_annotation_labels \
+  --subsets mnli_m --fold 0
+```
+
+The manifest is JSON configuration: it declares the task format, split paths,
+class order, and label mode:
 
 ```json
 {
   "format": "text_pair_label_distribution",
+  "label_mode": "soft",
+  "train_path": "data/datasets/text_pair/chaosnli/mnli_m/0/train.json",
+  "dev_path": "data/datasets/text_pair/chaosnli/mnli_m/0/dev.json",
   "labels": ["entailment", "neutral", "contradiction"]
 }
 ```
@@ -52,32 +74,27 @@ contradiction vote; the reader derives the human distribution `[0.50, 0.25,
 }
 ```
 
-See [data/README.md](data/README.md) for the complete data layout and the
-public dataset format.
+To use your own dataset, see [the bring-your-own-data guide](data/README.md)
+for the required format and training workflow.
 
-### Run one ChaosNLI configuration
+### Reuse JSON configuration; override one experiment from the CLI
 
-The launcher prepares missing ChaosNLI data and uses the project defaults. This
-command restricts the sweep to one model, one loss, and one seed:
+SPINDA does not assign fixed roles to configuration files. For example, you can
+keep the stable data definition in `dataset.json`, share optimization defaults
+in `configs/training.json`, and add a model- or experiment-specific JSON file
+only when it is reusable. This lets the same dataset definition be reused
+across models and experiments without copying it.
 
-```bash
-SUBSETS=mnli_m MODEL_SPECS=roberta-base RUN_SPECS='soft rel' SEEDS_OVERRIDE=42 GPU=0 \
-  bash scripts/chaosnli.sh
-```
-
-For direct training on an already prepared split, the essential configuration
-is the data paths, class order, `label_mode`, learning objective, seed, and
-output directory:
+Files merge from left to right. Explicit CLI values then take precedence, which
+is useful for a one-off ablation: the command below keeps the shared learning
+rate from `configs/training.json` everywhere else, but tests `1e-5` for this
+single run without editing or duplicating either JSON file.
 
 ```bash
 uv run spinda train \
-  --config configs/training.json \
+  --config data/datasets/text_pair/chaosnli/mnli_m/0/dataset.json configs/training.json \
   --model roberta-base \
-  --format text_pair_label_distribution \
-  --train_path data/datasets/text_pair/chaosnli/mnli_m/0/train.json \
-  --dev_path data/datasets/text_pair/chaosnli/mnli_m/0/dev.json \
-  --labels entailment neutral contradiction \
-  --label_mode soft \
+  --learning_rate 1e-5 \
   --label_training_strategy rel \
   --seeds 42 \
   --output_dir outputs/chaosnli_example
@@ -91,9 +108,33 @@ configuration precedence are in
 
 ## Evaluate and analyze a run
 
-First predict with a saved checkpoint, then evaluate the prediction file. The
-evaluation contract is model-independent, so external models can use the same
-analysis after exporting the required JSON/JSONL format.
+Evaluation and analysis are independent of SPINDA training. Any model can use
+them by writing the prediction contract: a `.jsonl` file has one record per
+line (or a `.json` file contains an array of the same records).
+
+```json
+{"id":"example-0001","outputs":{"probs":[0.10,0.75,0.15],"pred":1}}
+```
+
+`id` must match the evaluation data, and probability positions must use the
+same class order as the ground-truth dataset. For example, evaluate an
+externally trained model on the prepared ChaosNLI split without loading any
+SPINDA checkpoint:
+
+```bash
+uv run spinda evaluate \
+  --predictions external_predictions.jsonl \
+  --data_dir data/datasets/text_pair/chaosnli/mnli_m/0 \
+  --analysis --no-plot \
+  --output_file outputs/external_model/evaluation.json
+```
+
+The complete standalone input specification, including external ground truth
+and multi-dimensional outputs, is in
+[docs/prediction_contract.md](docs/prediction_contract.md).
+
+SPINDA's `predict` command is optional convenience: it writes the same format
+from a SPINDA checkpoint, so its output can be evaluated unchanged.
 
 ```bash
 uv run spinda predict \
