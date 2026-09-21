@@ -1,4 +1,4 @@
-"""Create the paper-standard SPINDA disagreement-analysis figures."""
+"""Aggregate seed runs and create SPINDA disagreement-analysis figures."""
 
 from __future__ import annotations
 
@@ -12,8 +12,7 @@ from typing import Any
 import numpy as np
 
 
-PAPER_GROUPS = ("low", "medium", "high")
-PAPER_COLORS = ("#4C78A8", "#E45756", "#54A24B", "#B279A2")
+STRATEGY_COLORS = ("#4C78A8", "#E45756", "#54A24B", "#B279A2")
 
 
 def _read_analysis(path: Path, level: str | None) -> dict[str, Any]:
@@ -45,18 +44,23 @@ def _read_tvd_errors(path: Path, level: str | None) -> np.ndarray:
     return values
 
 
-def _save_disagreement_tvd(values: dict[str, dict[str, list[float]]], output: Path, title: str | None) -> None:
+def _save_disagreement_tvd(
+    values: dict[str, dict[str, list[float]]],
+    groups: tuple[str, ...],
+    output: Path,
+    title: str | None,
+) -> None:
     import matplotlib.pyplot as plt
 
     output.parent.mkdir(parents=True, exist_ok=True)
     figure, axis = plt.subplots(figsize=(5.2, 3.1))
-    x = np.arange(len(PAPER_GROUPS), dtype=float)
+    x = np.arange(len(groups), dtype=float)
     for index, (label, series) in enumerate(values.items()):
-        means = np.asarray([np.mean(series[group]) for group in PAPER_GROUPS], dtype=float)
-        deviations = np.asarray([np.std(series[group], ddof=0) for group in PAPER_GROUPS], dtype=float)
-        axis.errorbar(x, means, yerr=deviations, marker="o", capsize=3, linewidth=1.8, label=label, color=PAPER_COLORS[index % len(PAPER_COLORS)])
-    axis.set_xticks(x, ("Low", "Medium", "High"))
-    axis.set_xlabel("Human disagreement level (entropy tertiles)")
+        means = np.asarray([np.mean(series[group]) for group in groups], dtype=float)
+        deviations = np.asarray([np.std(series[group], ddof=0) for group in groups], dtype=float)
+        axis.errorbar(x, means, yerr=deviations, marker="o", capsize=3, linewidth=1.8, label=label, color=STRATEGY_COLORS[index % len(STRATEGY_COLORS)])
+    axis.set_xticks(x, tuple(group.replace("_", " ").title() for group in groups))
+    axis.set_xlabel("Human disagreement group")
     axis.set_ylabel("TVD")
     axis.set_ylim(bottom=0)
     axis.grid(axis="y", linestyle="--", linewidth=0.6, alpha=0.35)
@@ -83,7 +87,7 @@ def _save_instance_tvd_violin(values: dict[str, list[float]], output: Path, titl
     violin = axis.violinplot([values[label] for label in labels], showmeans=False, showmedians=False, showextrema=False)
     series_by_label = [np.asarray(values[label], dtype=float) for label in labels]
     for index, body in enumerate(violin["bodies"]):
-        color = PAPER_COLORS[index % len(PAPER_COLORS)]
+        color = STRATEGY_COLORS[index % len(STRATEGY_COLORS)]
         body.set_facecolor(color)
         body.set_edgecolor(color)
         body.set_alpha(0.8)
@@ -112,49 +116,76 @@ def _save_instance_tvd_violin(values: dict[str, list[float]], output: Path, titl
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Create the two paper-standard disagreement-analysis figures from SPINDA evaluation artifacts."
+        description="Aggregate evaluation artifacts across seeds and create disagreement-analysis figures."
+    )
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument(
+        "--run-dirs", nargs="+", type=Path,
+        help="One strategy root per label; discovers seed artifacts automatically.",
+    )
+    input_group.add_argument(
+        "--analysis-files", nargs="+", type=Path,
+        help="Advanced: explicit analysis JSON files.",
     )
     parser.add_argument(
-        "--analysis-files", nargs="+", required=True, type=Path,
-        help="One or more JSON files written by evaluate --analysis; repeat labels for seed runs.",
+        "--instance-errors-files", nargs="+", type=Path,
+        help="Advanced: one instance-error CSV per explicit analysis file.",
     )
     parser.add_argument(
-        "--instance-errors-files", nargs="+", required=True, type=Path,
-        help="One CSV per analysis file, written by evaluate --analysis.",
-    )
-    parser.add_argument(
-        "--labels", nargs="+", required=True,
-        help="Display label for every input pair, for example: Hard_CE Hard_CE ReL ReL.",
+        "--labels", nargs="+",
+        help="One display label per run directory, or per explicit artifact pair.",
     )
     parser.add_argument("--level", help="Dimension to plot for multi-dimensional analyses.")
-    parser.add_argument("--output-dir", type=Path, default=Path("outputs/evaluation/paper_analysis"))
+    parser.add_argument("--output-dir", type=Path, default=Path("outputs/evaluation/disagreement_analysis"))
     parser.add_argument("--title", default=None)
     args = parser.parse_args()
 
-    if not (len(args.analysis_files) == len(args.instance_errors_files) == len(args.labels)):
-        parser.error("--analysis-files, --instance-errors-files, and --labels must have the same length.")
+    artifact_pairs: list[tuple[Path, Path, str]] = []
+    if args.run_dirs:
+        labels = args.labels or [run_dir.name for run_dir in args.run_dirs]
+        if len(labels) != len(args.run_dirs):
+            parser.error("--labels must provide one label per --run-dirs entry.")
+        for run_dir, label in zip(args.run_dirs, labels):
+            analysis_paths = sorted(run_dir.glob("seed_*/test/evaluation__analysis.json"))
+            if not analysis_paths:
+                parser.error(f"{run_dir} has no seed_*/test/evaluation__analysis.json artifacts. Run evaluate --analysis first.")
+            for analysis_path in analysis_paths:
+                errors_path = analysis_path.with_name(analysis_path.stem + "__instance_errors.csv")
+                if not errors_path.is_file():
+                    parser.error(f"Missing instance-error CSV beside {analysis_path}.")
+                artifact_pairs.append((analysis_path, errors_path, label))
+    else:
+        if not args.analysis_files or not args.instance_errors_files or not args.labels:
+            parser.error("--analysis-files requires --instance-errors-files and --labels.")
+        if not (len(args.analysis_files) == len(args.instance_errors_files) == len(args.labels)):
+            parser.error("--analysis-files, --instance-errors-files, and --labels must have the same length.")
+        artifact_pairs = list(zip(args.analysis_files, args.instance_errors_files, args.labels))
 
     by_label_group: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     by_label_errors: dict[str, list[float]] = defaultdict(list)
-    for analysis_path, errors_path, label in zip(args.analysis_files, args.instance_errors_files, args.labels):
+    group_names: tuple[str, ...] | None = None
+    for analysis_path, errors_path, label in artifact_pairs:
         report = _read_analysis(analysis_path, args.level)
         groups = report.get("groups", {})
-        if tuple(groups) != PAPER_GROUPS:
-            raise ValueError(
-                f"{analysis_path} must use the paper default of three entropy tertiles; "
-                "rerun evaluate with --analysis and no custom disagreement grouping."
-            )
-        for group in PAPER_GROUPS:
+        current_group_names = tuple(groups)
+        if not current_group_names:
+            raise ValueError(f"{analysis_path} has no disagreement groups.")
+        if group_names is None:
+            group_names = current_group_names
+        elif current_group_names != group_names:
+            raise ValueError("All analysis artifacts must use the same disagreement grouping.")
+        for group in current_group_names:
             metrics = groups[group].get("metrics")
             if not metrics or "tvd" not in metrics:
                 raise ValueError(f"{analysis_path} has no TVD result for the {group} group.")
             by_label_group[label][group].append(float(metrics["tvd"]))
         by_label_errors[label].extend(_read_tvd_errors(errors_path, args.level).tolist())
 
+    assert group_names is not None
     for suffix in ("png", "pdf"):
-        _save_disagreement_tvd(by_label_group, args.output_dir / f"disagreement_tvd.{suffix}", args.title)
+        _save_disagreement_tvd(by_label_group, group_names, args.output_dir / f"disagreement_tvd.{suffix}", args.title)
         _save_instance_tvd_violin(by_label_errors, args.output_dir / f"instance_tvd_violin.{suffix}", args.title)
-    print(f"Paper-standard plots saved to {args.output_dir}")
+    print(f"Disagreement-analysis plots saved to {args.output_dir}")
 
 
 if __name__ == "__main__":

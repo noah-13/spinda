@@ -9,7 +9,7 @@ Interpretation of Data with Human Label Variation*.
 | Single-label, multi-label, and multi-dimensional data | `hlv_toolkits.data.readers` |
 | Model-independent prediction contract | [prediction contract](prediction_contract.md) and `evaluate` |
 | Distribution-aware metrics and visualisation | `hlv_toolkits.eval` and `visualization` |
-| Entropy-stratified and instance-level analysis | `evaluate --analysis` plus `spinda analyze` paper figures |
+| Entropy-stratified and instance-level analysis | `evaluate --analysis` plus seed-aggregated `spinda analyze` plots |
 | Six paper dataset families | [reproduction launchers](reproducing_paper.md) |
 
 ## Release decisions

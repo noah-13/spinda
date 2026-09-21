@@ -85,27 +85,25 @@ See [prediction_contract.md](prediction_contract.md) for output JSON schemas.
 | `--ground_truth` | External JSON path | One of this or `--data_dir` is required | Lightweight external ground-truth source. |
 | `--ground_truth_split` | `train`, `dev`, `test` | `test` | Split to load from `--data_dir`. |
 | `--output_file` | JSON path or `null` | Auto-generated | Evaluation-results path. |
-| `--plot` / `--no-plot` | Boolean | `true` | Enable or disable static plots. |
-| `--plots` | One or more of `tvd`, `ternary` | `tvd ternary` | Static plot types. |
-| `--plot_dir` | Path or `null` | Auto-generated | Static-plot directory. |
-| `--plot_title` | String or `null` | Prediction filename | Plot title. |
+| `--plot` / `--no-plot` | Boolean | `true` | Enable or disable optional ternary diagnostics for three-class soft-label data. |
+| `--plot_dir` | Path or `null` | Auto-generated | Directory for ternary outputs. |
+| `--plot_title` | String or `null` | Prediction filename | Ternary plot title. |
 | `--ternary_source` | `model`, `human`, `both` | `both` | Probability source displayed in ternary plots. |
-| `--ternary_browser` / `--no-ternary_browser` | Boolean | `true` | Enable or disable interactive HTML ternary plots. |
+| `--ternary_browser` / `--no-ternary_browser` | Boolean | `true` | Also write an interactive HTML ternary plot with per-instance hover details. |
 | `--analysis` | Flag | `false` | Write disagreement-stratified metrics and instance-level errors. |
 | `--disagreement_groups` | Integer | `3` | Number of entropy/disagreement strata. |
 | `--disagreement_boundaries` | One or more floats | `null` | Explicit normalized-entropy cutoffs; provide `groups - 1` values. |
 | `--analysis-output-file` | JSON path or `null` | Next to evaluation output | Aggregate disagreement-analysis path. |
 | `--instance-errors-file` | CSV path or `null` | Next to analysis output | Per-instance error-table path. |
 
-## Paper-standard analysis plots
+## Seed-aggregated disagreement plots
 
 After producing categorical evaluation artifacts with `evaluate --analysis`, run
-`spinda analyze` with matching analysis JSON files, instance-error CSV files,
-and labels. It accepts repeated labels for multiple seeds and creates the two
-paper-standard Section 4.4 figures in PNG and PDF: entropy-tertile TVD with
-standard-deviation error bars, and instance-level TVD box plots. The command
-requires the default three entropy groups; pass `--level` for one
-multi-dimensional annotation level.
+`spinda analyze --run-dirs` with one strategy root per label. It discovers every
+`seed_*/test` analysis JSON and instance-error CSV pair and creates two PNG/PDF
+diagnostics: group-level TVD with standard-deviation error bars, and an
+instance-level TVD violin plot with an embedded box plot. All inputs must use
+the same grouping; pass `--level` for one multi-dimensional annotation level.
 
 ## Advanced and runtime options
 

@@ -5,59 +5,6 @@ from typing import Any, Sequence
 
 import numpy as np
 
-"""
-TVD plot from "Stop Measuring Calibration When Humans Disagree" (Baan et al., EMNLP 2022)
-- DistCE (Distribution Calibration Error) = TVD(model_probs, human_probs)
-"""
-
-def save_tvd_plot(
-    tvd: np.ndarray,
-    output_path: Path,
-    title: str | None = None,
-    bins: int = 30,
-) -> bool:
-    try:
-        import matplotlib.pyplot as plt
-        import seaborn as sns
-    except ImportError:
-        return False
-
-    values = tvd.astype(float)
-    values = values[np.isfinite(values)]
-    if values.size == 0:
-        return True
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    try:
-        with plt.style.context("seaborn-v0_8-darkgrid"):
-            fig, axes = plt.subplots(nrows=1, ncols=1, figsize=(10, 5))
-    except Exception:
-        fig, axes = plt.subplots(nrows=1, ncols=1, figsize=(10, 5))
-
-    sns.histplot(
-        values,
-        binwidth=1 / bins,
-        binrange=(0, 1),
-        kde=True,
-        stat="probability",
-        ax=axes,
-    )
-
-    axes.set(xlabel="TVD")
-    axes.set(title=title)
-    axes.set(ylim=(0, 0.135))
-
-    fig.tight_layout()
-    fig.savefig(output_path)
-    plt.close(fig)
-
-    return True
-
-
-save_distce_plot = save_tvd_plot
-
-
 def _validate_simplex_vector(values: np.ndarray | Sequence[float], name: str) -> np.ndarray:
     arr = np.asarray(values, dtype=float)
     if arr.shape != (3,):

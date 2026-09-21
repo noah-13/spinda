@@ -10,10 +10,8 @@ from hlv_toolkits.visualization import (
     plot_ternary_axes,
     plot_ternary_bounds,
     save_distribution_ternary_plot,
-    save_distce_plot,
     save_interactive_distribution_ternary_plot,
     save_ternary_plot,
-    save_tvd_plot,
 )
 
 
@@ -73,7 +71,7 @@ def test_plot_ternary_bounds_and_bootstrap_runs():
     fig.clf()
 
 
-def test_save_ternary_plot_and_distce_alias(tmp_path):
+def test_save_ternary_plot(tmp_path):
     pytest.importorskip("ternary")
     output = tmp_path / "ternary.png"
     pred = np.array([[0.7, 0.2, 0.1], [0.1, 0.7, 0.2]], dtype=float)
@@ -82,12 +80,6 @@ def test_save_ternary_plot_and_distce_alias(tmp_path):
     ok = save_ternary_plot([pred, human], output_path=output, dataset_names=["Model", "Human"])
     assert ok is True
     assert output.exists()
-
-    tvd = np.array([0.1, 0.2], dtype=float)
-    distce_out = tmp_path / "distce.png"
-    assert save_distce_plot is save_tvd_plot
-    assert save_distce_plot(tvd, distce_out) is True
-    assert distce_out.exists()
 
 
 @pytest.mark.parametrize("source", ["model", "human", "both"])

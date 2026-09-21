@@ -170,6 +170,7 @@ def main() -> None:
             fold_dir.mkdir(parents=True, exist_ok=True)
             manifest = {
                 "format": "text_pair_label_distribution",
+                "label_mode": "soft",
                 "train_path": str(fold_dir / "train.json"),
                 "dev_path": str(fold_dir / "dev.json"),
                 "labels": LABELS,

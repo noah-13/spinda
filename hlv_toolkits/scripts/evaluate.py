@@ -32,9 +32,7 @@ from hlv_toolkits.eval import Evaluator, analyze_distributional_disagreement, in
 from hlv_toolkits.visualization import (
     save_distribution_ternary_plot,
     save_interactive_distribution_ternary_plot,
-    save_tvd_plot,
 )
-from hlv_toolkits.eval.metrics import compute_tvd
 from hlv_toolkits.data.json_io import load_records
 
 
@@ -206,17 +204,6 @@ def main() -> None:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Whether to save plots (default: enabled)",
-    )
-
-    parser.add_argument(
-        "--plots",
-        nargs="+",
-        default=["tvd", "ternary"],
-        choices=["tvd", "ternary"],
-        help=(
-            "Plot types to save (default: tvd, ternary). "
-            "Use as: --plots tvd ternary"
-        ),
     )
 
     parser.add_argument(
@@ -450,17 +437,33 @@ def main() -> None:
         print(f"Analysis saved to {analysis_path}")
         print(f"Per-instance errors saved to {errors_path}")
 
-    # Optional plots are only available for soft-label evaluation artifacts.
-    if args.plot and eval_output is not None and eval_output.pred_probs is not None:
-        selected_plots = set(args.plots)
+    # Ternary diagnostics are optional and apply only to three-class soft-label data.
+    if args.plot and eval_output is not None and eval_output.pred_probs is not None and eval_output.pred_probs.shape[1] == 3:
         plot_dir = Path(args.plot_dir) if args.plot_dir else Path("outputs/evaluation/figures")
         title = args.plot_title or Path(args.predictions).stem
-        if "tvd" in selected_plots:
-            tvd = compute_tvd(eval_output.pred_probs, eval_output.human_probs)
-            if tvd is not None:
-                save_tvd_plot(tvd, plot_dir / f"{Path(args.predictions).stem}_tvd.png", title=title)
-        if "ternary" in selected_plots and eval_output.pred_probs.shape[1] == 3:
-            save_distribution_ternary_plot(eval_output.pred_probs, eval_output.human_probs, plot_dir / f"{Path(args.predictions).stem}_ternary.png", args.ternary_source, title)
+        stem = Path(args.predictions).stem
+        save_distribution_ternary_plot(
+            model_distributions=eval_output.pred_probs,
+            human_distributions=eval_output.human_probs,
+            output_path=plot_dir / f"{stem}_ternary.png",
+            distribution_source=args.ternary_source,
+            title=title,
+        )
+        if args.ternary_browser:
+            samples_by_id = {sample.id: sample for sample in ground_truth}
+            matched_samples = [samples_by_id[prediction.id] for prediction in predictions]
+            premises = [getattr(sample, "text_a", "") for sample in matched_samples]
+            hypotheses = [getattr(sample, "text_b", getattr(sample, "text", "")) for sample in matched_samples]
+            save_interactive_distribution_ternary_plot(
+                model_distributions=eval_output.pred_probs,
+                human_distributions=eval_output.human_probs,
+                output_path=plot_dir / f"{stem}_ternary.html",
+                distribution_source=args.ternary_source,
+                title=title,
+                ids=[prediction.id for prediction in predictions],
+                premises=premises,
+                hypotheses=hypotheses,
+            )
 
 
 if __name__ == "__main__":

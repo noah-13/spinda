@@ -47,15 +47,16 @@ and instance-level errors beside the output. Do not commit these generated files
 Other shell scripts are development, parallel, or recovery helpers—not the
 supported paper-reproduction interface.
 
-## Paper-standard disagreement figures
+## Aggregate seed runs and visualize disagreement
 
-Run evaluate --analysis once for every seed and strategy. Then give the paired
-analysis JSON and instance-error CSV files to spinda analyze. Repeated labels
-are pooled as the seed runs for one strategy. The command writes both PNG and
-PDF versions of the two Section 4.4 figures: entropy-tertile TVD with standard
-deviation error bars, and instance-level TVD box plots (IQR, median, mean).
+Run `evaluate --analysis` once for every seed and strategy. Then give each
+strategy root to `spinda analyze`; repeated seed artifacts are pooled under one
+label. The command writes PNG and PDF versions of group-level TVD with
+standard-deviation error bars and instance-level TVD violin plots with embedded
+IQR boxes, medians, and means.
 
-    uv run spinda analyze --analysis-files hard_42__analysis.json hard_43__analysis.json rel_42__analysis.json rel_43__analysis.json --instance-errors-files hard_42__analysis__instance_errors.csv hard_43__analysis__instance_errors.csv rel_42__analysis__instance_errors.csv rel_43__analysis__instance_errors.csv --labels Hard_CE Hard_CE ReL ReL --output-dir outputs/paper_analysis
+    uv run spinda analyze --run-dirs outputs/chaosnli/mnli_m/fold_0/roberta-base__soft_to_hard__ce outputs/chaosnli/mnli_m/fold_0/roberta-base__soft__rel --labels Hard_CE ReL --output-dir outputs/disagreement_analysis
 
-For a multi-dimensional dataset, add --level level1. The input analyses must
-use the default three entropy groups; this preserves the paper definition.
+For a multi-dimensional dataset, add `--level level1`. The input analyses must
+use the same entropy grouping. The default three tertiles reproduce the paper's
+reported grouping, while other groupings are supported for new analyses.
