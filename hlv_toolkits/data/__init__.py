@@ -15,11 +15,11 @@ from hlv_toolkits.data.schemas import (
 from hlv_toolkits.data.readers.base import (
     BaseReader,
 )
-from hlv_toolkits.data.readers.multilevel_reader import TextPairMultilevelJSONLReader
-from hlv_toolkits.data.readers.text_pair_reader import TextPairClassificationJSONLReader
-from hlv_toolkits.data.readers.single_text_reader import SingleTextClassificationJSONLReader
-from hlv_toolkits.data.readers.single_text_multilabel_reader import SingleTextMultilabelJSONLReader
-from hlv_toolkits.data.readers.single_text_multilevel_reader import SingleTextMultilevelJSONLReader
+from hlv_toolkits.data.readers.multilevel_reader import TextPairMultilevelJSONReader
+from hlv_toolkits.data.readers.text_pair_reader import TextPairClassificationJSONReader
+from hlv_toolkits.data.readers.single_text_reader import SingleTextClassificationJSONReader
+from hlv_toolkits.data.readers.single_text_multilabel_reader import SingleTextMultilabelJSONReader
+from hlv_toolkits.data.readers.single_text_multilevel_reader import SingleTextMultilevelJSONReader
 
 __all__ = [
     # Schemas
@@ -36,9 +36,9 @@ __all__ = [
     "Split",
     # Readers
     "BaseReader",
-    "TextPairMultilevelJSONLReader",
-    "TextPairClassificationJSONLReader",
-    "SingleTextClassificationJSONLReader",
-    "SingleTextMultilabelJSONLReader",
-    "SingleTextMultilevelJSONLReader",
+    "TextPairMultilevelJSONReader",
+    "TextPairClassificationJSONReader",
+    "SingleTextClassificationJSONReader",
+    "SingleTextMultilabelJSONReader",
+    "SingleTextMultilevelJSONReader",
 ]

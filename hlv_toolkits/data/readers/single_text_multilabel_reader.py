@@ -13,7 +13,7 @@ from hlv_toolkits.data.schemas import SingleTextMultilabelDistributionSample, Sp
 SINGLE_TEXT_MULTILABEL_TASK = "single_text_multilabel_annotation_distribution"
 
 
-class SingleTextMultilabelJSONLReader(BaseReader):
+class SingleTextMultilabelJSONReader(BaseReader):
     def __init__(self, data_dir: Optional[str] = None, *, data_format: Optional[str] = None,
                  train_path: Optional[str] = None, dev_path: Optional[str] = None,
                  labels: Optional[Sequence[str]] = None) -> None:

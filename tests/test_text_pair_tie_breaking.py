@@ -1,6 +1,6 @@
 import json
 
-from hlv_toolkits.data import TextPairClassificationJSONLReader
+from hlv_toolkits.data import TextPairClassificationJSONReader
 
 
 def test_vote_distribution_labels_break_ties_reproducibly_without_lowest_label_bias(tmp_path):
@@ -21,13 +21,13 @@ def test_vote_distribution_labels_break_ties_reproducibly_without_lowest_label_b
         for index in range(20)
     ]
     for split in ("train", "dev", "test"):
-        (data / f"{split}.jsonl").write_text(
-            "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+        (data / f"{split}.json").write_text(
+            json.dumps(rows), encoding="utf-8"
         )
 
-    first = TextPairClassificationJSONLReader(str(data), label_mode="soft_to_hard").load_train()
-    second = TextPairClassificationJSONLReader(str(data), label_mode="soft_to_hard").load_train()
-    soft_test = TextPairClassificationJSONLReader(str(data)).load_test()
+    first = TextPairClassificationJSONReader(str(data), label_mode="soft_to_hard").load_train()
+    second = TextPairClassificationJSONReader(str(data), label_mode="soft_to_hard").load_train()
+    soft_test = TextPairClassificationJSONReader(str(data)).load_test()
 
     assert [sample.label for sample in first] == [sample.label for sample in second]
     assert {sample.label for sample in first} == {0, 1}

@@ -15,18 +15,18 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from hlv_toolkits.data import (
-    SingleTextClassificationJSONLReader,
+    SingleTextClassificationJSONReader,
     SingleTextDistributionSample,
-    SingleTextMultilabelJSONLReader,
+    SingleTextMultilabelJSONReader,
     SingleTextMultilabelDistributionSample,
-    SingleTextMultilevelJSONLReader,
+    SingleTextMultilevelJSONReader,
     SingleTextMultilevelSample,
     TextPairClassificationSample,
     TextPairDistributionSample,
-    TextPairMultilevelJSONLReader,
+    TextPairMultilevelJSONReader,
     MultilevelSample,
     PredictionRecord,
-    TextPairClassificationJSONLReader,
+    TextPairClassificationJSONReader,
 )
 from hlv_toolkits.eval import Evaluator, analyze_distributional_disagreement, instance_error_records
 from hlv_toolkits.visualization import (
@@ -97,6 +97,8 @@ def load_predictions(
     """Load predictions from a JSON array."""
     if predictions_format != "json":
         raise ValueError(f"Unsupported predictions_format={predictions_format!r}")
+    if file_path.suffix != ".json":
+        raise ValueError(f"Prediction input must be a .json file containing a top-level array, got {file_path}.")
     predictions = []
     for index, data in enumerate(load_records(file_path, kind="predictions"), 1):
         if not isinstance(data, dict):
@@ -283,16 +285,16 @@ def main() -> None:
         manifest = json.loads((Path(args.data_dir) / "dataset.json").read_text(encoding="utf-8"))
         data_format = manifest.get("format")
         if data_format == "text_pair_label_distribution":
-            ground_truth = TextPairClassificationJSONLReader(args.data_dir).load_split(args.ground_truth_split)
+            ground_truth = TextPairClassificationJSONReader(args.data_dir).load_split(args.ground_truth_split)
         elif data_format == "single_text_label_distribution":
-            ground_truth = SingleTextClassificationJSONLReader(args.data_dir).load_split(args.ground_truth_split)
+            ground_truth = SingleTextClassificationJSONReader(args.data_dir).load_split(args.ground_truth_split)
         elif data_format == "single_text_multilabel_annotation_distribution":
-            ground_truth = SingleTextMultilabelJSONLReader(args.data_dir).load_split(args.ground_truth_split)
+            ground_truth = SingleTextMultilabelJSONReader(args.data_dir).load_split(args.ground_truth_split)
         elif data_format == "text_pair_multidimensional_label_distribution":
-            ground_truth = TextPairMultilevelJSONLReader(args.data_dir).load_split(args.ground_truth_split)
+            ground_truth = TextPairMultilevelJSONReader(args.data_dir).load_split(args.ground_truth_split)
             multilevel_eval = True
         elif data_format == "single_text_multidimensional_label_distribution":
-            ground_truth = SingleTextMultilevelJSONLReader(args.data_dir).load_split(args.ground_truth_split)
+            ground_truth = SingleTextMultilevelJSONReader(args.data_dir).load_split(args.ground_truth_split)
             multilevel_eval = True
         else:
             raise ValueError(f"Unsupported evaluation format: {data_format!r}")

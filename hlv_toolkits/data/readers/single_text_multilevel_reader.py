@@ -4,14 +4,14 @@ from __future__ import annotations
 import json
 from typing import List
 
-from hlv_toolkits.data.readers.multilevel_reader import TextPairMultilevelJSONLReader
+from hlv_toolkits.data.readers.multilevel_reader import TextPairMultilevelJSONReader
 from hlv_toolkits.data.json_io import load_records, split_path
 from hlv_toolkits.data.schemas import SingleTextMultilevelSample, Split
 from hlv_toolkits.data.tie_breaking import tied_argmax
 
 
-class SingleTextMultilevelJSONLReader(TextPairMultilevelJSONLReader):
-    """Read the single-text multilevel JSONL contract."""
+class SingleTextMultilevelJSONReader(TextPairMultilevelJSONReader):
+    """Read the single-text multilevel JSON contract."""
 
     DATA_FORMAT = "single_text_multidimensional_label_distribution"
 

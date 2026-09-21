@@ -16,11 +16,11 @@ from typing import Any, Dict, List
 import torch
 
 from hlv_toolkits.data import (
-    SingleTextClassificationJSONLReader,
-    SingleTextMultilabelJSONLReader,
-    SingleTextMultilevelJSONLReader,
-    TextPairClassificationJSONLReader,
-    TextPairMultilevelJSONLReader,
+    SingleTextClassificationJSONReader,
+    SingleTextMultilabelJSONReader,
+    SingleTextMultilevelJSONReader,
+    TextPairClassificationJSONReader,
+    TextPairMultilevelJSONReader,
 )
 from hlv_toolkits.data.schemas import PredictionRecord
 from hlv_toolkits.data.json_io import write_records
@@ -153,6 +153,9 @@ def main() -> None:
 
 
     args = parser.parse_args()
+    output_path = Path(args.output_file)
+    if output_path.suffix != ".json":
+        parser.error("--output_file must end in .json; prediction output uses a top-level JSON array.")
 
     if args.device == "auto":
         args.device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -180,15 +183,15 @@ def main() -> None:
     manifest = json.loads((Path(args.data_dir) / "dataset.json").read_text(encoding="utf-8"))
     data_format = manifest.get("format")
     if data_format == "text_pair_label_distribution":
-        samples = TextPairClassificationJSONLReader(args.data_dir).load_split(args.split)
+        samples = TextPairClassificationJSONReader(args.data_dir).load_split(args.split)
     elif data_format == "single_text_label_distribution":
-        samples = SingleTextClassificationJSONLReader(args.data_dir).load_split(args.split)
+        samples = SingleTextClassificationJSONReader(args.data_dir).load_split(args.split)
     elif data_format == "single_text_multilabel_annotation_distribution":
-        samples = SingleTextMultilabelJSONLReader(args.data_dir).load_split(args.split)
+        samples = SingleTextMultilabelJSONReader(args.data_dir).load_split(args.split)
     elif data_format == "text_pair_multidimensional_label_distribution":
-        samples = TextPairMultilevelJSONLReader(args.data_dir).load_split(args.split)
+        samples = TextPairMultilevelJSONReader(args.data_dir).load_split(args.split)
     elif data_format == "single_text_multidimensional_label_distribution":
-        samples = SingleTextMultilevelJSONLReader(args.data_dir).load_split(args.split)
+        samples = SingleTextMultilevelJSONReader(args.data_dir).load_split(args.split)
     else:
         raise ValueError(f"Unsupported prediction format: {data_format!r}")
 
@@ -232,7 +235,6 @@ def main() -> None:
 
     print(f"Generated {len(predictions)} predictions")
 
-    output_path = Path(args.output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     write_records(output_path, ({

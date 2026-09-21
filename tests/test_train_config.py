@@ -22,8 +22,8 @@ def test_training_config_preserves_multilevel_manifest_labels(tmp_path):
                 "format": "single_text_multidimensional_label_distribution",
                 "label_mode": "soft",
                 "level_labels": {"level1": ["a", "b"], "level2": ["c", "d"], "level3": ["e", "f"]},
-                "train_path": "train.jsonl",
-                "dev_path": "dev.jsonl",
+                "train_path": "train.json",
+                "dev_path": "dev.json",
             }
         ),
         encoding="utf-8",
@@ -38,8 +38,8 @@ def test_training_config_preserves_multilevel_manifest_labels(tmp_path):
         "data_format": "single_text_multidimensional_label_distribution",
         "label_mode": "soft",
         "level_labels": {"level1": ["a", "b"], "level2": ["c", "d"], "level3": ["e", "f"]},
-        "train_path": "train.jsonl",
-        "dev_path": "dev.jsonl",
+        "train_path": "train.json",
+        "dev_path": "dev.json",
     }
 
 

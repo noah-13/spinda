@@ -18,11 +18,11 @@ from typing import Any
 import torch
 
 from hlv_toolkits.data import (
-    TextPairMultilevelJSONLReader,
-    TextPairClassificationJSONLReader,
-    SingleTextClassificationJSONLReader,
-    SingleTextMultilabelJSONLReader,
-    SingleTextMultilevelJSONLReader,
+    TextPairMultilevelJSONReader,
+    TextPairClassificationJSONReader,
+    SingleTextClassificationJSONReader,
+    SingleTextMultilabelJSONReader,
+    SingleTextMultilevelJSONReader,
 )
 from hlv_toolkits.models import HLVTrainer, TrainingConfig
 
@@ -281,7 +281,7 @@ def main() -> None:
             raise ValueError("--format text_pair_label_distribution is required for text-pair training.")
         if not args.train_path:
             raise ValueError("--train_path is required for text-pair training.")
-        reader = TextPairClassificationJSONLReader(
+        reader = TextPairClassificationJSONReader(
             data_format=args.data_format,
             train_path=args.train_path,
             dev_path=args.dev_path,
@@ -300,7 +300,7 @@ def main() -> None:
     elif args.data_source == "single_text":
         if args.data_format != "single_text_label_distribution" or not args.train_path:
             raise ValueError("--format single_text_label_distribution and --train_path are required for single-text training.")
-        reader = SingleTextClassificationJSONLReader(data_format=args.data_format, train_path=args.train_path, dev_path=args.dev_path, labels=args.labels, label_mode=args.label_mode)
+        reader = SingleTextClassificationJSONReader(data_format=args.data_format, train_path=args.train_path, dev_path=args.dev_path, labels=args.labels, label_mode=args.label_mode)
         num_labels, label_names, args.use_soft_labels = len(reader.labels), reader.labels, reader.use_soft_labels
         train_samples = reader.load_train()
         eval_samples = reader.load_dev() if reader.has_dev else None
@@ -311,7 +311,7 @@ def main() -> None:
             raise ValueError("MFRC requires --label_mode soft (probability targets) or soft_to_hard (per-label majority vote).")
         if args.label_mode == "soft_to_hard" and args.soft_label_loss != "ce":
             raise ValueError("MFRC soft_to_hard training supports only --label_training_strategy ce.")
-        reader = SingleTextMultilabelJSONLReader(data_format=args.data_format, train_path=args.train_path, dev_path=args.dev_path, labels=args.labels)
+        reader = SingleTextMultilabelJSONReader(data_format=args.data_format, train_path=args.train_path, dev_path=args.dev_path, labels=args.labels)
         num_labels, label_names = len(reader.labels), reader.labels
         args.use_soft_labels = args.label_mode == "soft"
         train_samples = reader.load_train()
@@ -326,7 +326,7 @@ def main() -> None:
         if args.label_mode not in {None, "soft", "hard", "soft_to_hard"}:
             raise ValueError("Multilevel label-distribution formats support label_mode soft, hard, or soft_to_hard.")
         args.use_soft_labels = args.label_mode == "soft"
-        reader_cls = SingleTextMultilevelJSONLReader if args.data_format == "single_text_multidimensional_label_distribution" else TextPairMultilevelJSONLReader
+        reader_cls = SingleTextMultilevelJSONReader if args.data_format == "single_text_multidimensional_label_distribution" else TextPairMultilevelJSONReader
         reader = reader_cls(data_path=args.train_path)
         if args.level_labels is not None:
             configured_labels = reader._validate_level_labels(args.level_labels)

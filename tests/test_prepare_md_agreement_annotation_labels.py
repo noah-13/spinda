@@ -57,7 +57,7 @@ def test_prepare_md_agreement_rejects_non_binary_or_wrong_vote_count(tmp_path):
 
 
 def test_md_agreement_output_loads_as_single_text_soft_dataset(tmp_path):
-    from hlv_toolkits.data import SingleTextClassificationJSONLReader
+    from hlv_toolkits.data import SingleTextClassificationJSONReader
 
     raw = tmp_path / "raw"
     raw.mkdir()
@@ -68,7 +68,7 @@ def test_md_agreement_output_loads_as_single_text_soft_dataset(tmp_path):
     output = tmp_path / "processed"
     prepare_md_agreement(raw, output)
 
-    sample = SingleTextClassificationJSONLReader(str(output)).load_train()[0]
+    sample = SingleTextClassificationJSONReader(str(output)).load_train()[0]
     assert sample.text == "tweet"
     assert sample.label == 0
     assert sample.human_dist == [0.6, 0.4]
@@ -76,7 +76,7 @@ def test_md_agreement_output_loads_as_single_text_soft_dataset(tmp_path):
 
 
 def test_md_agreement_soft_to_hard_retains_distribution_for_dev_metrics(tmp_path):
-    from hlv_toolkits.data import SingleTextClassificationJSONLReader
+    from hlv_toolkits.data import SingleTextClassificationJSONReader
 
     raw = tmp_path / "raw"
     raw.mkdir()
@@ -87,7 +87,7 @@ def test_md_agreement_soft_to_hard_retains_distribution_for_dev_metrics(tmp_path
     output = tmp_path / "processed"
     prepare_md_agreement(raw, output)
 
-    sample = SingleTextClassificationJSONLReader(
+    sample = SingleTextClassificationJSONReader(
         data_format="single_text_label_distribution",
         train_path=str(output / "train.json"),
         dev_path=str(output / "dev.json"),

@@ -1,6 +1,6 @@
 import json
 
-from hlv_toolkits.data import SingleTextMultilabelJSONLReader
+from hlv_toolkits.data import SingleTextMultilabelJSONReader
 from hlv_toolkits.scripts.prepare_mfrc_annotation_labels import prepare_mfrc
 
 
@@ -16,7 +16,7 @@ def test_prepare_mfrc_groups_annotators_and_reader_preserves_votes(tmp_path):
     manifest = json.loads((output / "dataset.json").read_text(encoding="utf-8"))
     assert manifest["format"] == "single_text_multilabel_annotation_distribution"
     split = next(split for split, count in counts.items() if count)
-    sample = SingleTextMultilabelJSONLReader(str(output)).load_split(split)[0]
+    sample = SingleTextMultilabelJSONReader(str(output)).load_split(split)[0]
     assert sample.annotation_label_sets == [[0, 1], [0], [7]]
     assert sample.human_probs == [2 / 3, 1 / 3, 0.0, 0.0, 0.0, 0.0, 0.0, 1 / 3]
     assert sample.labels == [1, 0, 0, 0, 0, 0, 0, 0]

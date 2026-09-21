@@ -7,7 +7,7 @@ from hlv_toolkits.data.json_io import load_records, split_path
 from hlv_toolkits.data.tie_breaking import tied_argmax
 from hlv_toolkits.data.schemas import MultilevelSample, Split
 
-class TextPairMultilevelJSONLReader(BaseReader):
+class TextPairMultilevelJSONReader(BaseReader):
     LEVEL_ORDER = ("level1", "level2", "level3")
     DATA_FORMAT = "text_pair_multidimensional_label_distribution"
 

@@ -77,7 +77,7 @@ contradiction vote; the reader derives the human distribution `[0.50, 0.25,
 To use your own dataset, see [the bring-your-own-data guide](data/README.md)
 for the required format and training workflow.
 
-### Reuse JSON configuration; override one experiment from the CLI
+### Train with reusable JSON configuration and CLI overrides
 
 SPINDA does not assign fixed roles to configuration files. For example, you can
 keep the stable data definition in `dataset.json`, share optimization defaults
@@ -108,22 +108,43 @@ configuration precedence are in
 
 ## Evaluate and analyze a run
 
-Evaluation and analysis are independent of SPINDA training. Any model can use
-them by writing the prediction contract: a `.jsonl` file has one record per
-line (or a `.json` file contains an array of the same records).
+### A SPINDA-trained model
 
-```json
-{"id":"example-0001","outputs":{"probs":[0.10,0.75,0.15],"pred":1}}
+For a checkpoint trained above, prediction and evaluation connect directly:
+`predict` writes the JSON file that `evaluate` accepts, with no conversion.
+
+```bash
+uv run spinda predict \
+  --model_path outputs/chaosnli_example/seed_42/final_model \
+  --data_dir data/datasets/text_pair/chaosnli/mnli_m/0 \
+  --split test \
+  --output_file outputs/chaosnli_example/seed_42/test/predictions.json
+
+uv run spinda evaluate \
+  --predictions outputs/chaosnli_example/seed_42/test/predictions.json \
+  --data_dir data/datasets/text_pair/chaosnli/mnli_m/0 \
+  --analysis --no-plot \
+  --output_file outputs/chaosnli_example/seed_42/test/evaluation.json
 ```
 
-`id` must match the evaluation data, and probability positions must use the
-same class order as the ground-truth dataset. For example, evaluate an
-externally trained model on the prepared ChaosNLI split without loading any
-SPINDA checkpoint:
+### An external model
+
+The evaluation and analysis commands also work independently of SPINDA
+training. Convert an external model's output into a `.json` top-level array;
+each record needs a matching `id`, probability vector in the dataset's class
+order, and its zero-based predicted class:
+
+```json
+[
+  {"id":"example-0001","outputs":{"probs":[0.10,0.75,0.15],"pred":1}}
+]
+```
+
+Then run the same evaluator without loading any SPINDA checkpoint:
 
 ```bash
 uv run spinda evaluate \
-  --predictions external_predictions.jsonl \
+  --predictions external_predictions.json \
   --data_dir data/datasets/text_pair/chaosnli/mnli_m/0 \
   --analysis --no-plot \
   --output_file outputs/external_model/evaluation.json
@@ -132,23 +153,6 @@ uv run spinda evaluate \
 The complete standalone input specification, including external ground truth
 and multi-dimensional outputs, is in
 [docs/prediction_contract.md](docs/prediction_contract.md).
-
-SPINDA's `predict` command is optional convenience: it writes the same format
-from a SPINDA checkpoint, so its output can be evaluated unchanged.
-
-```bash
-uv run spinda predict \
-  --model_path outputs/chaosnli_example/seed_42/final_model \
-  --data_dir data/datasets/text_pair/chaosnli/mnli_m/0 \
-  --split test \
-  --output_file outputs/chaosnli_example/seed_42/test/predictions.jsonl
-
-uv run spinda evaluate \
-  --predictions outputs/chaosnli_example/seed_42/test/predictions.jsonl \
-  --data_dir data/datasets/text_pair/chaosnli/mnli_m/0 \
-  --analysis --no-plot \
-  --output_file outputs/chaosnli_example/seed_42/test/evaluation.json
-```
 
 `evaluate --analysis` writes aggregate metrics, a disagreement-stratified
 report, and a per-instance error table. To compare strategies across several
@@ -179,7 +183,7 @@ the PNG.
 
 - [Data layout and public dataset format](data/README.md)
 - [Configuration reference](docs/configuration_reference.md)
-- [Prediction JSON/JSONL contract](docs/prediction_contract.md)
+- [Prediction JSON contract](docs/prediction_contract.md)
 - [HLV metric tutorial](docs/hlv_metrics_tutorial.md)
 
 SPINDA supports text-pair and single-text classification, multi-label data, and

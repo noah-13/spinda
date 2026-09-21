@@ -16,7 +16,7 @@ MANIFEST_FILENAME = "dataset.json"
 LabelMode = Literal["hard", "soft", "soft_to_hard"]
 
 
-class TextPairClassificationJSONLReader(BaseReader):
+class TextPairClassificationJSONReader(BaseReader):
     """Load hard labels, soft distributions, or explicit soft-to-hard conversions.
 
     New training calls use ``format``, ``train_path`` and an optional ``dev_path``.

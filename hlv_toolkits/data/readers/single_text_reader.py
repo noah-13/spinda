@@ -14,7 +14,7 @@ SINGLE_TEXT_TASK = "single_text_label_distribution"
 LabelMode = Literal["hard", "soft", "soft_to_hard"]
 
 
-class SingleTextClassificationJSONLReader(BaseReader):
+class SingleTextClassificationJSONReader(BaseReader):
     """Read single-text examples while retaining annotation votes for soft labels."""
 
     def __init__(self, data_dir: Optional[str] = None, *, data_format: Optional[str] = None,

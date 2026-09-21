@@ -52,7 +52,7 @@ uv run python -m hlv_toolkits.scripts.evaluate \
 
 ## Prediction JSON
 
-Write a top-level JSON array. Each object requires `id`,
+Write a `.json` file containing a top-level array. Each record requires `id`,
 `outputs.probs`, and `outputs.pred`:
 
 ```json
@@ -68,9 +68,9 @@ Write a top-level JSON array. Each object requires `id`,
 - `outputs.pred` is the zero-based predicted class index. It should normally
   be `argmax(outputs.probs)`.
 
-This toolkit's `predict` command emits the same format, with additional
-`task`, `split`, and `source` fields. Thus a toolkit prediction can be passed
-to `evaluate` unchanged.
+This toolkit's `predict` command emits the same records, with additional
+`task`, `split`, and `source` fields, in a `predictions.json` top-level array.
+It can be passed to `evaluate` unchanged.
 
 ## Multidimensional prediction JSON
 
