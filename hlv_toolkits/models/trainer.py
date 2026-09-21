@@ -837,7 +837,7 @@ class HLVTrainer:
                 kl_div = float(np.mean(np.sum(labels * (np.log(labels + eps) - np.log(pred_probs + eps)), axis=-1)))
                 tvd = float(np.mean(0.5 * np.sum(np.abs(pred_probs - labels), axis=-1)))
                 return {
-                    "accuracy": accuracy, "kl_divergence": kl_div,
+                    "accuracy": accuracy, "tvd": tvd, "kl_divergence": kl_div,
                     "soft_micro_f1": compute_soft_micro_f1(pred_probs, labels),
                     "soft_macro_f1": compute_soft_macro_f1(pred_probs, labels),
                 }

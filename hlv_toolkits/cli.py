@@ -1,4 +1,4 @@
-"""Installed command-line entry point for SPINDA."""
+"""Installed command-line entry point for SPInDa."""
 
 import sys
 from importlib import import_module
@@ -14,7 +14,7 @@ COMMANDS = {
 
 
 def main() -> None:
-    """Dispatch a SPINDA command without importing ML dependencies eagerly."""
+    """Dispatch a SPInDa command without importing ML dependencies eagerly."""
     if len(sys.argv) < 2:
         print("Usage: spinda <command> [options]")
         print("\nCommands: train, predict, evaluate, download, analyze")

@@ -1,4 +1,4 @@
-"""I/O helpers for SPINDA's public JSON-array data contract."""
+"""I/O helpers for SPInDa's public JSON-array data contract."""
 from __future__ import annotations
 
 import json
@@ -28,5 +28,5 @@ def split_path(directory: Path, split: str) -> Path:
 def write_records(path: Path, records: Iterable[Any]) -> None:
     """Write a public top-level JSON array to a ``.json`` file."""
     if path.suffix != ".json":
-        raise ValueError(f"Public SPINDA records must use a .json path, got {path}.")
+        raise ValueError(f"Public SPInDa records must use a .json path, got {path}.")
     path.write_text(json.dumps(list(records), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

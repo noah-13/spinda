@@ -24,7 +24,7 @@ Run commands from the repository root:
 
 ## Start with ChaosNLI
 
-[ChaosNLI](https://aclanthology.org/2020.emnlp-main.734/) is a three-way NLI task with many annotations per example. SPINDA keeps the original votes
+[ChaosNLI](https://aclanthology.org/2020.emnlp-main.734/) is a three-way NLI task with many annotations per example. SPInDa keeps the original votes
 rather than reducing them to one label. Its prepared layout is:
 
 ```text
@@ -37,7 +37,7 @@ data/datasets/text_pair/chaosnli/mnli_m/0/
 
 ### Prepare the data
 
-Download the raw release and convert the MNLI-M fold into SPINDA's dataset
+Download the raw release and convert the MNLI-M fold into SPInDa's dataset
 format:
 
 ```bash
@@ -78,7 +78,7 @@ for the required format and training workflow.
 
 ### Train with reusable JSON configuration and CLI overrides
 
-SPINDA does not assign fixed roles to configuration files. For example, you can
+SPInDa does not assign fixed roles to configuration files. For example, you can
 keep the stable data definition in `dataset.json`, share optimization defaults
 in `configs/training.json`, and add a model- or experiment-specific JSON file
 only when it is reusable. This lets the same dataset definition be reused
@@ -107,7 +107,7 @@ configuration precedence are in
 
 ## Evaluate and analyze a run
 
-### A SPINDA-trained model
+### A SPInDa-trained model
 
 For a checkpoint trained above, prediction and evaluation connect directly:
 `predict` writes the JSON file that `evaluate` accepts, with no conversion.
@@ -128,7 +128,7 @@ uv run spinda evaluate \
 
 ### An external model
 
-The evaluation and analysis commands also work independently of SPINDA
+The evaluation and analysis commands also work independently of SPInDa
 training. Convert an external model's output into a `.json` top-level array;
 each record needs a matching `id`, probability vector in the dataset's class
 order, and its zero-based predicted class:
@@ -139,7 +139,7 @@ order, and its zero-based predicted class:
 ]
 ```
 
-Then run the same evaluator without loading any SPINDA checkpoint:
+Then run the same evaluator without loading any SPInDa checkpoint:
 
 ```bash
 uv run spinda evaluate \
@@ -155,7 +155,7 @@ and multi-dimensional outputs, is in
 
 `evaluate --analysis` writes aggregate metrics, a disagreement-stratified
 report, and a per-instance error table. To compare strategies across several
-seeds, pass one run directory per strategy. SPINDA discovers the matching
+seeds, pass one run directory per strategy. SPInDa discovers the matching
 analysis artifacts beneath each `seed_*/test/` directory.
 
 ```bash
@@ -185,7 +185,7 @@ the PNG.
 - [Prediction JSON contract](docs/prediction_contract.md)
 - [HLV metric tutorial](docs/hlv_metrics_tutorial.md)
 
-SPINDA supports text-pair and single-text classification, multi-label data, and
+SPInDa supports text-pair and single-text classification, multi-label data, and
 multi-dimensional annotations. The repository's canonical launchers for
 ChaosNLI, DiscoGeM, MD-Agreement, MultiPICo, TGeGUM/Humans-and-Domains, and
 MFRC are listed in the paper guide below.
@@ -198,4 +198,4 @@ scope. It is intentionally separate from the general workflow above.
 
 ## License
 
-SPINDA is released under the [MIT License](LICENSE).
+SPInDa is released under the [MIT License](LICENSE).

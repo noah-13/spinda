@@ -1,4 +1,4 @@
-"""Aggregate seed runs and create SPINDA disagreement-analysis figures."""
+"""Aggregate seed runs and create SPInDa disagreement-analysis figures."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def _read_analysis(path: Path, level: str | None) -> dict[str, Any]:
     try:
         return payload["disagreement_stratified"]
     except KeyError as error:
-        raise ValueError(f"{path} is not a categorical SPINDA analysis JSON.") from error
+        raise ValueError(f"{path} is not a categorical SPInDa analysis JSON.") from error
 
 
 def _read_tvd_errors(path: Path, level: str | None) -> np.ndarray:

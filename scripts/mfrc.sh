@@ -14,7 +14,7 @@ RUN_NAME="${RUN_NAME:-default}"
 FORCE_PREPARE="${FORCE_PREPARE:-0}"
 MULTILABEL_METRIC_FOR_BEST_MODEL="${MULTILABEL_METRIC_FOR_BEST_MODEL:-soft_micro_f1}"
 
-if [[ "$FORCE_PREPARE" == "1" || ! -s "$DATA_DIR/dataset.json" ]]; then
+if [[ "$FORCE_PREPARE" == "1" || ! -s "$DATA_DIR/dataset.json" || ! -s "$DATA_DIR/train.json" || ! -s "$DATA_DIR/dev.json" || ! -s "$DATA_DIR/test.json" ]]; then
   uv run python -m hlv_toolkits.scripts.prepare_mfrc_annotation_labels \
     --output-dir "$DATA_DIR"
 fi

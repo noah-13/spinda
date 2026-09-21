@@ -12,7 +12,7 @@ if [[ -n "${LEVEL:-}" ]]; then LEVELS=("$LEVEL"); else LEVELS=(level1 level2 lev
 
 for level in "${LEVELS[@]}"; do
   DATASET_CONFIG="data/datasets/text_pair/discogem/english/$level/dataset.json"
-  if [[ ! -s "$DATASET_CONFIG" ]]; then
+  if [[ ! -s "$DATASET_CONFIG" || ! -s "${DATASET_CONFIG%/dataset.json}/train.json" || ! -s "${DATASET_CONFIG%/dataset.json}/dev.json" || ! -s "${DATASET_CONFIG%/dataset.json}/test.json" ]]; then
     uv run python -m hlv_toolkits.scripts.prepare_discogem_annotation_labels --variants english
   fi
   DATASET_CONFIG="$DATASET_CONFIG" RUN_NAME="$level" OUT_ROOT="$OUT_ROOT" TRAINING_CONFIG="$TRAINING_CONFIG" \

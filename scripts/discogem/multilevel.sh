@@ -29,7 +29,7 @@ for variant in $VARIANTS; do
       ;;
   esac
 
-  if [[ ! -s "$dataset_config" ]]; then
+  if [[ ! -s "$dataset_config" || ! -s "${dataset_config%/dataset.json}/train.json" || ! -s "${dataset_config%/dataset.json}/dev.json" || ! -s "${dataset_config%/dataset.json}/test.json" ]]; then
     uv run python -m hlv_toolkits.scripts.prepare_discogem_annotation_labels --variants "$variant"
   fi
   variant_models="${MODEL_SPECS:-$default_models}"

@@ -1,6 +1,6 @@
 # Bring your own data
 
-This guide describes how to use SPINDA with a dataset of your own. Your data
+This guide describes how to use SPInDa with a dataset of your own. Your data
 may live anywhere; `data/datasets/my_dataset/` is a convenient local default.
 Do not commit large or licensed data files.
 
@@ -72,7 +72,7 @@ Extra fields are retained as metadata but do not affect label parsing.
 
 ## Human-label variation: choose a label mode
 
-Use `annotation_labels` to retain every individual vote. SPINDA derives the
+Use `annotation_labels` to retain every individual vote. SPInDa derives the
 empirical distribution from the vote counts.
 
 | `label_mode` | Row example | Training target |
@@ -81,7 +81,7 @@ empirical distribution from the vote counts.
 | `soft` | `[0, 1, 1, 1]` | Distribution `[0.25, 0.75]`; use `ce`, `mse`, `jsd`, or `rel`. |
 | `soft_to_hard` | `[0, 1, 1, 1]` | Majority-vote hard class; only `ce` is valid, while soft labels remain available for evaluation. |
 
-Declare the mode explicitly. If it is omitted, SPINDA infers `hard` for a
+Declare the mode explicitly. If it is omitted, SPInDa infers `hard` for a
 single vote and `soft` for multiple votes and emits a warning. `rel`
 (repeated-label learning) is useful when the individual annotations—not only
 their normalized aggregate—should affect the objective.
@@ -154,7 +154,7 @@ same as the text-pair format.
 Use `single_text_multilabel_annotation_distribution` when each annotator can
 select more than one label. `annotation_label_sets` has one list per
 annotator; an empty inner list is valid and means that annotator selected no
-labels. SPINDA derives one independent Bernoulli probability per label, so the
+labels. SPInDa derives one independent Bernoulli probability per label, so the
 probabilities do not need to sum to one. Its rows do not use a categorical
 label mode. For training, set `label_mode` to `soft` for probability targets or
 `soft_to_hard` for per-label majority-vote targets; the latter permits only

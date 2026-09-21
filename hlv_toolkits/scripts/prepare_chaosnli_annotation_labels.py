@@ -20,8 +20,8 @@ from hlv_toolkits.data.json_io import write_records
 
 LABELS = ["entailment", "neutral", "contradiction"]
 SUBSET_FILENAMES = {
-    "snli": "chaosNLI_snli.json",
-    "mnli_m": "chaosNLI_mnli_m.json",
+    "snli": "chaosNLI_snli.jsonl",
+    "mnli_m": "chaosNLI_mnli_m.jsonl",
 }
 NUM_FOLDS = 10
 DEV_PORTION = 0.1

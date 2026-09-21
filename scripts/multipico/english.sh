@@ -14,7 +14,7 @@ SWEEP_SCRIPT="${SWEEP_SCRIPT:-scripts/run_text_pair_sweep.sh}"
 # English-only encoders; do not mix these with the multilingual screen.
 MODEL_SPECS="${MODEL_SPECS:-microsoft/deberta-v3-large;roberta-base;bert-base-uncased;Twitter/twhin-bert-base}"
 
-if [[ "${FORCE_PREPARE:-0}" == "1" || ! -s "$DATA_DIR/dataset.json" ]]; then
+if [[ "${FORCE_PREPARE:-0}" == "1" || ! -s "$DATA_DIR/dataset.json" || ! -s "$DATA_DIR/train.json" || ! -s "$DATA_DIR/dev.json" || ! -s "$DATA_DIR/test.json" ]]; then
   uv run python -m hlv_toolkits.scripts.prepare_multipico_annotation_labels \
     --input-dir "$INPUT_DIR" --output-dir "$DATA_DIR" --language en
 fi
