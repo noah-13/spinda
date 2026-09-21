@@ -5,7 +5,7 @@ Prediction script for NLI models.
 Example usage:
     python -m hlv_toolkits.scripts.predict \
         --model_path ./outputs/roberta_snli/final_model \
-        --output_file predictions.jsonl
+        --output_file predictions.json
 """
 
 import argparse
@@ -23,6 +23,7 @@ from hlv_toolkits.data import (
     TextPairMultilevelJSONLReader,
 )
 from hlv_toolkits.data.schemas import PredictionRecord
+from hlv_toolkits.data.json_io import write_records
 from hlv_toolkits.models.trainer import (
     MULTILEVEL_LEVEL_ORDER,
     MultiLevelClassificationModel,
@@ -37,14 +38,14 @@ def _build_multilevel_outputs(level_probs: Dict[str, torch.Tensor]) -> List[Dict
     results: List[Dict[str, Any]] = []
     for row_idx in range(batch_size):
         row_levels: Dict[str, Dict[str, Any]] = {}
-        for level in MULTILEVEL_LEVEL_ORDER:
+        for level in level_probs:
             probs = level_probs[level][row_idx]
             pred = int(torch.argmax(probs).item())
             row_levels[level] = {
                 "probs": probs.cpu().tolist(),
                 "pred": pred,
             }
-        results.append({"levels": row_levels})
+        results.append({"dimensions": row_levels})
     return results
 
 
@@ -78,7 +79,7 @@ def predict_batch(
         if isinstance(model, MultiLevelClassificationModel):
             level_probs = {
                 level: torch.softmax(logit, dim=-1)
-                for level, logit in zip(MULTILEVEL_LEVEL_ORDER, logits)
+                for level, logit in zip(model.level_num_labels, logits)
             }
             return _build_multilevel_outputs(level_probs)
 
@@ -117,8 +118,8 @@ def main() -> None:
     parser.add_argument(
         "--output_file",
         type=str,
-        default="predictions.jsonl",
-        help="Output file path (JSONL format)",
+        default="predictions.json",
+        help="Output file path (JSON array format)",
     )
 
     parser.add_argument(
@@ -146,7 +147,7 @@ def main() -> None:
         "--data_dir",
         type=str,
         default=None,
-        help="Direct JSONL dataset directory containing dataset.json",
+        help="Direct JSON dataset directory containing dataset.json",
     )
 
 
@@ -184,9 +185,9 @@ def main() -> None:
         samples = SingleTextClassificationJSONLReader(args.data_dir).load_split(args.split)
     elif data_format == "single_text_multilabel_annotation_distribution":
         samples = SingleTextMultilabelJSONLReader(args.data_dir).load_split(args.split)
-    elif data_format == "text_pair_multilevel_label_distribution":
+    elif data_format == "text_pair_multidimensional_label_distribution":
         samples = TextPairMultilevelJSONLReader(args.data_dir).load_split(args.split)
-    elif data_format == "single_text_multilevel_label_distribution":
+    elif data_format == "single_text_multidimensional_label_distribution":
         samples = SingleTextMultilevelJSONLReader(args.data_dir).load_split(args.split)
     else:
         raise ValueError(f"Unsupported prediction format: {data_format!r}")
@@ -234,16 +235,10 @@ def main() -> None:
     output_path = Path(args.output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(output_path, "w", encoding="utf-8") as f:
-        for pred in predictions:
-            pred_dict = {
-                "id": pred.id,
-                "task": pred.task,
-                "split": pred.split,
-                "source": pred.source,
-                "outputs": pred.outputs,
-            }
-            f.write(json.dumps(pred_dict) + "\n")
+    write_records(output_path, ({
+        "id": pred.id, "task": pred.task, "split": pred.split,
+        "source": pred.source, "outputs": pred.outputs,
+    } for pred in predictions))
 
     print(f"Predictions saved to {output_path}")
 

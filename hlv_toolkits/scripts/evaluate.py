@@ -4,95 +4,134 @@ Evaluation script for HLV predictions.
 
 Example usage:
     uv run python -m hlv_toolkits.scripts.evaluate\
-        --predictions outputs/predictions/toolkit_preds.jsonl\
+        --predictions outputs/predictions/toolkit_preds.json\
         --data_dir data/processed/text_pair/chaosnli
 """
 
 import argparse
+import csv
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from hlv_toolkits.data import (
     SingleTextClassificationJSONLReader,
     SingleTextDistributionSample,
+    SingleTextMultilabelJSONLReader,
+    SingleTextMultilabelDistributionSample,
+    SingleTextMultilevelJSONLReader,
+    SingleTextMultilevelSample,
     TextPairClassificationSample,
     TextPairDistributionSample,
+    TextPairMultilevelJSONLReader,
+    MultilevelSample,
     PredictionRecord,
     TextPairClassificationJSONLReader,
 )
-from hlv_toolkits.eval import Evaluator
+from hlv_toolkits.eval import Evaluator, analyze_distributional_disagreement, instance_error_records
 from hlv_toolkits.visualization import (
     save_distribution_ternary_plot,
     save_interactive_distribution_ternary_plot,
     save_tvd_plot,
 )
 from hlv_toolkits.eval.metrics import compute_tvd
+from hlv_toolkits.data.json_io import load_records
 
+
+MultilevelGroundTruthSample = Union[MultilevelSample, SingleTextMultilevelSample]
+
+
+def _get_multilevel_prediction_payload(
+    prediction: PredictionRecord,
+    level: str,
+) -> Optional[Dict[str, Any]]:
+    """Return one level's ``{probs, pred}`` payload from a prediction record."""
+    levels = prediction.outputs.get("dimensions")
+    if not isinstance(levels, dict):
+        return None
+    payload = levels.get(level)
+    return payload if isinstance(payload, dict) else None
+
+
+def _build_multilevel_eval_inputs(
+    predictions: Sequence[PredictionRecord],
+    ground_truth: Sequence[MultilevelGroundTruthSample],
+    level: str,
+) -> Tuple[List[PredictionRecord], List[TextPairDistributionSample]]:
+    """Adapt one level of the multilevel JSON contract for ``Evaluator``."""
+    ground_truth_by_id = {sample.id: sample for sample in ground_truth}
+    level_predictions: List[PredictionRecord] = []
+    level_ground_truth: List[TextPairDistributionSample] = []
+
+    for prediction in predictions:
+        sample = ground_truth_by_id.get(prediction.id)
+        payload = _get_multilevel_prediction_payload(prediction, level)
+        if sample is None:
+            raise ValueError(f"Prediction {prediction.id} has no matching multilevel ground truth.")
+        if payload is None:
+            raise ValueError(f"Prediction {prediction.id} is missing outputs.dimensions.{level}.")
+        level_predictions.append(
+            PredictionRecord(
+                id=prediction.id,
+                task=prediction.task,
+                split=prediction.split,
+                source=prediction.source,
+                outputs=payload,
+            )
+        )
+        level_ground_truth.append(
+            TextPairDistributionSample(
+                id=sample.id,
+                task=sample.task,
+                split=sample.split,
+                source=sample.source,
+                label=sample.hard_labels[level],
+                human_dist=sample.human_dists[level],
+            )
+        )
+    return level_predictions, level_ground_truth
 
 
 def load_predictions(
     file_path: Path,
-    predictions_format: str = "jsonl",
+    predictions_format: str = "json",
 ) -> List[PredictionRecord]:
-    """Load predictions from JSONL."""
+    """Load predictions from a JSON array."""
+    if predictions_format != "json":
+        raise ValueError(f"Unsupported predictions_format={predictions_format!r}")
     predictions = []
-    with open(file_path, "r", encoding="utf-8") as f:
-        for line_num, line in enumerate(f, 1):
-            if not line.strip():
-                continue
-            if predictions_format == "jsonl":
-                try:
-                    data = json.loads(line)
-                    pred = PredictionRecord(
-                        id=data["id"],
-                        task=data.get("task", "nli"),
-                        split=data.get("split", "unknown"),
-                        source=data.get("source"),
-                        outputs=data["outputs"],
-                    )
-                    predictions.append(pred)
-                    continue
-                except json.JSONDecodeError:
-                    raise ValueError(
-                        f"Invalid JSONL on line {line_num} "
-                        f"while predictions_format=jsonl"
-                    )
-
-            raise ValueError(
-                f"Could not parse line {line_num} with "
-                f"predictions_format={predictions_format}"
-            )
+    for index, data in enumerate(load_records(file_path, kind="predictions"), 1):
+        if not isinstance(data, dict):
+            raise ValueError(f"Prediction {index} in {file_path} must be a JSON object.")
+        try:
+            predictions.append(PredictionRecord(id=data["id"], task=data.get("task", "nli"), split=data.get("split", "unknown"), source=data.get("source"), outputs=data["outputs"]))
+        except KeyError as error:
+            raise ValueError(f"Prediction {index} in {file_path} requires {error.args[0]!r}.") from error
     return predictions
 
 
 def load_ground_truth(file_path: Path) -> List[TextPairClassificationSample]:
-    """Load lightweight external ground truth JSONL, ignoring extra metadata."""
+    """Load lightweight external ground truth JSON, ignoring extra metadata."""
     rows: List[tuple[str, int, Optional[List[float]]]] = []
-    with open(file_path, "r", encoding="utf-8") as f:
-        for line_num, line in enumerate(f, 1):
-            if not line.strip():
-                continue
-            try:
-                data = json.loads(line)
-            except json.JSONDecodeError as error:
-                raise ValueError(f"Invalid ground-truth JSONL on line {line_num}") from error
-            try:
-                sample_id = data["id"]
-                label = data["label"]
-            except KeyError as error:
-                raise ValueError(
-                    f"Ground truth on line {line_num} requires {error.args[0]!r}."
-                ) from error
-            if not isinstance(sample_id, str) or not isinstance(label, int):
-                raise ValueError(f"Ground truth on line {line_num} requires string id and integer label.")
-            human_dist = data.get("human_dist")
-            if human_dist is not None and (
-                not isinstance(human_dist, list)
-                or not all(isinstance(value, (int, float)) for value in human_dist)
-            ):
-                raise ValueError(f"Ground truth human_dist on line {line_num} must be a numeric list.")
-            rows.append((sample_id, label, human_dist))
+    for line_num, data in enumerate(load_records(file_path, kind="ground-truth records"), 1):
+        if not isinstance(data, dict):
+            raise ValueError(f"Ground truth record {line_num} in {file_path} must be a JSON object.")
+        try:
+            sample_id = data["id"]
+            label = data["label"]
+        except KeyError as error:
+            raise ValueError(
+                f"Ground truth on line {line_num} requires {error.args[0]!r}."
+            ) from error
+        if not isinstance(sample_id, str) or not isinstance(label, int):
+            raise ValueError(f"Ground truth on line {line_num} requires string id and integer label.")
+        human_dist = data.get("human_dist")
+        if human_dist is not None and (
+            not isinstance(human_dist, list)
+            or not all(isinstance(value, (int, float)) for value in human_dist)
+        ):
+            raise ValueError(f"Ground truth human_dist on line {line_num} must be a numeric list.")
+        rows.append((sample_id, label, human_dist))
 
     has_distributions = any(human_dist is not None for _, _, human_dist in rows)
     if has_distributions and any(human_dist is None for _, _, human_dist in rows):
@@ -120,15 +159,15 @@ def main() -> None:
         "--predictions",
         type=str,
         required=True,
-        help="Path to predictions JSONL file",
+        help="Path to predictions JSON file",
     )
 
     parser.add_argument(
         "--predictions_format",
         type=str,
-        default="jsonl",
-        choices=["jsonl"],
-        help="Predictions file format (default: jsonl)",
+        default="json",
+        choices=["json"],
+        help="Predictions file format (default: json)",
     )
     
     
@@ -149,7 +188,7 @@ def main() -> None:
     ground_truth_input.add_argument(
         "--ground_truth",
         type=str,
-        help="Lightweight external ground-truth JSONL file",
+        help="Lightweight external ground-truth JSON file",
     )
 
     parser.add_argument(
@@ -208,6 +247,37 @@ def main() -> None:
         default=True,
         help="Whether to also save an interactive browser ternary plot as HTML (default: enabled).",
     )
+
+    parser.add_argument(
+        "--analysis",
+        action="store_true",
+        help="Write disagreement-stratified metrics and instance-error summaries for categorical soft labels.",
+    )
+    parser.add_argument(
+        "--disagreement-groups",
+        type=int,
+        default=3,
+        help="Number of entropy strata; defaults to low/medium/high tertiles.",
+    )
+    parser.add_argument(
+        "--disagreement-boundaries",
+        nargs="+",
+        type=float,
+        default=None,
+        help="Explicit normalized-entropy cutoffs; must contain groups minus one values.",
+    )
+    parser.add_argument(
+        "--analysis-output-file",
+        type=str,
+        default=None,
+        help="JSON path for the aggregate analysis (default: next to evaluation output).",
+    )
+    parser.add_argument(
+        "--instance-errors-file",
+        type=str,
+        default=None,
+        help="CSV path for per-instance errors (default: next to aggregate analysis).",
+    )
     
     args = parser.parse_args()
     
@@ -229,31 +299,39 @@ def main() -> None:
             ground_truth = TextPairClassificationJSONLReader(args.data_dir).load_split(args.ground_truth_split)
         elif data_format == "single_text_label_distribution":
             ground_truth = SingleTextClassificationJSONLReader(args.data_dir).load_split(args.ground_truth_split)
+        elif data_format == "single_text_multilabel_annotation_distribution":
+            ground_truth = SingleTextMultilabelJSONLReader(args.data_dir).load_split(args.ground_truth_split)
+        elif data_format == "text_pair_multidimensional_label_distribution":
+            ground_truth = TextPairMultilevelJSONLReader(args.data_dir).load_split(args.ground_truth_split)
+            multilevel_eval = True
+        elif data_format == "single_text_multidimensional_label_distribution":
+            ground_truth = SingleTextMultilevelJSONLReader(args.data_dir).load_split(args.ground_truth_split)
+            multilevel_eval = True
         else:
             raise ValueError(f"Unsupported evaluation format: {data_format!r}")
 
     print(f"Loaded {len(ground_truth)} ground truth samples")
 
-    # Diagnostics: how many predictions can be matched to ground truth?
-    gt_dict = {gt.id: gt for gt in ground_truth}
-    overlap = sum(1 for p in predictions if p.id in gt_dict)
-    print(f"Matched prediction IDs: {overlap}/{len(predictions)}")
+    Evaluator.validate_prediction_coverage(predictions, ground_truth)
+    print(f"Matched prediction IDs: {len(predictions)}/{len(ground_truth)}")
     
     # Evaluate
     evaluator = Evaluator()
     eval_output = None
     if multilevel_eval:
         print("Computing multilevel metrics...")
-        if not ground_truth or not isinstance(ground_truth[0], MultilevelSample):
-            raise ValueError("Multilevel DiscoGeM evaluation requires MultilevelSample ground truth.")
+        if not ground_truth or not isinstance(ground_truth[0], (MultilevelSample, SingleTextMultilevelSample)):
+            raise ValueError("Multilevel evaluation requires multilevel ground truth.")
 
-        multilevel_ground_truth = [gt for gt in ground_truth if isinstance(gt, MultilevelSample)]
-        if not any(_get_multilevel_prediction_payload(pred, "level1") is not None for pred in predictions):
-            raise ValueError("Multilevel DiscoGeM evaluation requires prediction records with nested 'levels' outputs.")
+        multilevel_ground_truth = [
+            gt for gt in ground_truth if isinstance(gt, (MultilevelSample, SingleTextMultilevelSample))
+        ]
+        if not any(_get_multilevel_prediction_payload(pred, next(iter(multilevel_ground_truth[0].human_dists))) is not None for pred in predictions):
+            raise ValueError("Multilevel evaluation requires prediction records with nested 'outputs.dimensions' payloads.")
 
         results: Dict[str, Any] = {}
         aggregate_metrics: Dict[str, List[float]] = {}
-        for level in ["level1", "level2", "level3"]:
+        for level in multilevel_ground_truth[0].human_dists:
             level_predictions, level_ground_truth = _build_multilevel_eval_inputs(
                 predictions,
                 multilevel_ground_truth,
@@ -278,18 +356,61 @@ def main() -> None:
         eval_output = evaluator.evaluate(predictions, ground_truth)
         results = eval_output.metrics
 
-        if ground_truth and isinstance(ground_truth[0], (TextPairDistributionSample, SingleTextDistributionSample)):
+        if ground_truth and isinstance(ground_truth[0], (TextPairDistributionSample, SingleTextDistributionSample, SingleTextMultilabelDistributionSample)):
             valid = 0 if eval_output.pred_probs is None else len(eval_output.pred_probs)
         else:
             valid = 0 if eval_output.pred_labels is None else len(eval_output.pred_labels)
         print(f"Valid pairs used for metrics: {valid}/{len(predictions)}")
+
+    analysis_payload = None
+    instance_records: List[Dict[str, object]] = []
+    if args.analysis:
+        if multilevel_eval:
+            analysis_payload = {}
+            for level in multilevel_ground_truth[0].human_dists:
+                level_predictions, level_ground_truth = _build_multilevel_eval_inputs(
+                    predictions, multilevel_ground_truth, level
+                )
+                level_artifacts = evaluator.evaluate(level_predictions, level_ground_truth)
+                if level_artifacts.pred_probs is None:
+                    raise ValueError("Disagreement analysis requires categorical distribution labels.")
+                analysis_payload[level] = analyze_distributional_disagreement(
+                    level_artifacts.pred_probs, level_artifacts.human_probs,
+                    level_artifacts.pred_labels, level_artifacts.true_labels,
+                    num_groups=args.disagreement_groups,
+                    boundaries=args.disagreement_boundaries,
+                )
+                for row in instance_error_records(
+                    [prediction.id for prediction in level_predictions],
+                    level_artifacts.pred_probs, level_artifacts.human_probs,
+                    level_artifacts.pred_labels, level_artifacts.true_labels,
+                    num_groups=args.disagreement_groups,
+                    boundaries=args.disagreement_boundaries,
+                ):
+                    instance_records.append({"level": level, **row})
+        else:
+            if eval_output is None or eval_output.pred_probs is None:
+                raise ValueError("Disagreement analysis requires categorical distribution labels.")
+            analysis_payload = analyze_distributional_disagreement(
+                eval_output.pred_probs, eval_output.human_probs,
+                eval_output.pred_labels, eval_output.true_labels,
+                num_groups=args.disagreement_groups,
+                boundaries=args.disagreement_boundaries,
+            )
+            instance_records = instance_error_records(
+                [prediction.id for prediction in predictions],
+                eval_output.pred_probs, eval_output.human_probs,
+                eval_output.pred_labels, eval_output.true_labels,
+                num_groups=args.disagreement_groups,
+                boundaries=args.disagreement_boundaries,
+            )
 
     # Print results
     print("\n" + "=" * 50)
     print("Evaluation Results")
     print("=" * 50)
     if multilevel_eval:
-        for level in ["level1", "level2", "level3"]:
+        for level in multilevel_ground_truth[0].human_dists:
             print(f"[{level}]")
             for metric_name, value in sorted(results[level].items()):
                 print(f"  {metric_name:18s}: {value:.4f}")
@@ -313,6 +434,21 @@ def main() -> None:
         json.dump(results, f, indent=2)
     
     print(f"\nResults saved to {output_path}")
+
+    if analysis_payload is not None:
+        analysis_path = Path(args.analysis_output_file) if args.analysis_output_file else output_path.with_name(output_path.stem + "__analysis.json")
+        analysis_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(analysis_path, "w", encoding="utf-8") as f:
+            json.dump(analysis_payload, f, indent=2)
+        errors_path = Path(args.instance_errors_file) if args.instance_errors_file else analysis_path.with_name(analysis_path.stem + "__instance_errors.csv")
+        errors_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(errors_path, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(instance_records[0]) if instance_records else [])
+            if instance_records:
+                writer.writeheader()
+                writer.writerows(instance_records)
+        print(f"Analysis saved to {analysis_path}")
+        print(f"Per-instance errors saved to {errors_path}")
 
     # Optional plots are only available for soft-label evaluation artifacts.
     if args.plot and eval_output is not None and eval_output.pred_probs is not None:

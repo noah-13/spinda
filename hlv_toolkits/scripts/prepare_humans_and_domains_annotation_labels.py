@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from hlv_toolkits.data.tie_breaking import tied_argmax
+from hlv_toolkits.data.json_io import write_records
 from hlv_toolkits.scripts.download_data import download_humans_and_domains
 
 TASKS = ("genre", "topic1", "topic2")
@@ -63,12 +64,12 @@ def _write_single_task(splits: Mapping[str, Mapping[str, Mapping[str, Any]]], ou
     labels = _task_labels(splits, task)
     label_to_id = {label: index for index, label in enumerate(labels)}
     output_dir.mkdir(parents=True, exist_ok=True)
-    manifest = {"format": "single_text_label_distribution", "label_mode": "soft", "labels": labels, "train_path": str(output_dir / "train.jsonl"), "dev_path": str(output_dir / "dev.jsonl")}
+    manifest = {"format": "single_text_label_distribution", "label_mode": "soft", "labels": labels, "train_path": str(output_dir / "train.json"), "dev_path": str(output_dir / "dev.json")}
     (output_dir / "dataset.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     counts = {}
     for split, rows in splits.items():
         records = [_record(item_id, row, split, task, label_to_id) for item_id, row in rows.items()]
-        (output_dir / f"{split}.jsonl").write_text("".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records), encoding="utf-8")
+        write_records(output_dir / f"{split}.json", records)
         counts[split] = len(records)
     return counts
 
@@ -77,7 +78,7 @@ def _write_multilevel(splits: Mapping[str, Mapping[str, Mapping[str, Any]]], out
     labels = {f"level{index + 1}": _task_labels(splits, task) for index, task in enumerate(TASKS)}
     ids = {level: {label: index for index, label in enumerate(values)} for level, values in labels.items()}
     output_dir.mkdir(parents=True, exist_ok=True)
-    manifest = {"format": "single_text_multilevel_label_distribution", "label_mode": "soft", "level_labels": labels, "train_path": str(output_dir / "train.jsonl"), "dev_path": str(output_dir / "dev.jsonl")}
+    manifest = {"format": "single_text_multidimensional_label_distribution", "label_mode": "soft", "level_labels": labels, "train_path": str(output_dir / "train.json"), "dev_path": str(output_dir / "dev.json")}
     (output_dir / "dataset.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     counts = {}
     for split, rows in splits.items():
@@ -96,8 +97,8 @@ def _write_multilevel(splits: Mapping[str, Mapping[str, Mapping[str, Any]]], out
                 distribution = [level_votes.count(index) / len(level_votes) for index in range(len(labels[level]))]
                 human_dists[level] = distribution
                 hard_labels[level] = tied_argmax(distribution, str(item_id), f"humans_and_domains:{level}")
-            records.append({"_schema": "SingleTextMultilevelSample", "id": f"humans_and_domains:multilevel:{split}:{item_id}", "task": "humans_and_domains", "split": split, "source": "tgegum", "text": text, "hard_labels": hard_labels, "human_dists": human_dists, "meta": {"source_id": item_id, "annotation_votes": votes, "level_tasks": {"level1": "genre", "level2": "topic1", "level3": "topic2"}}})
-        (output_dir / f"{split}.jsonl").write_text("".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records), encoding="utf-8")
+            records.append({"_schema": "SingleTextMultilevelSample", "id": f"humans_and_domains:multilevel:{split}:{item_id}", "task": "humans_and_domains", "split": split, "source": "tgegum", "text": text, "annotation_labels": votes, "meta": {"source_id": item_id, "dimension_tasks": {"level1": "genre", "level2": "topic1", "level3": "topic2"}}})
+        write_records(output_dir / f"{split}.json", records)
         counts[split] = len(records)
     return counts
 

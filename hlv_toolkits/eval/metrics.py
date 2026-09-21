@@ -12,6 +12,7 @@ def validate_and_fix_probs(
     name: str = "probs",
     axis: int = 1,
     atol: float = 1e-6,
+    require_normalized: bool = True,
 ) -> np.ndarray:
     """
     Validate probability matrix and fix small floating-point deviations.
@@ -19,8 +20,9 @@ def validate_and_fix_probs(
     - Requires 2D array [N, num_classes]
     - Non-negative
     - Finite
-    - Row sums close to 1 (within atol)
-    - Automatically renormalizes small deviations
+    - When ``require_normalized`` is true, row sums must be close to 1
+      (within ``atol``), and small floating-point deviations are normalized.
+      Set it to false for independent multi-label probabilities.
     """
     probs = np.asarray(probs, dtype=np.float64)
 
@@ -33,15 +35,13 @@ def validate_and_fix_probs(
     if np.any(probs < 0):
         raise ValueError(f"{name} contains negative values")
 
-    row_sums = probs.sum(axis=axis, keepdims=True)
-
-    if not np.allclose(row_sums, 1.0, atol=atol):
-        raise ValueError(
-            f"Each row of {name} must sum to 1 within tolerance {atol}"
-        )
-
-    # Fix tiny floating point drift
-    probs = probs / row_sums
+    if require_normalized:
+        row_sums = probs.sum(axis=axis, keepdims=True)
+        if not np.allclose(row_sums, 1.0, atol=atol):
+            raise ValueError(
+                f"Each row of {name} must sum to 1 within tolerance {atol}"
+            )
+        probs = probs / row_sums
 
     return probs
 
@@ -232,39 +232,39 @@ def compute_jsd(
     epsilon: float = 1e-12,
 ) -> np.ndarray:
     """
-    Per-sample Jensen–Shannon distance.
+    Compute per-sample Jensen–Shannon divergence (JSD).
 
-    JSD is defined as:
+    For distributions ``p`` and ``q``, with ``m = 0.5 * (p + q)``, JSD is:
 
-    JSD(p, q) = sqrt( 0.5 * KL(p || m) + 0.5 * KL(q || m) )
-    where m = 0.5 * (p + q)
+        JSD(p, q) = 0.5 * KL(p || m) + 0.5 * KL(q || m)
 
-    JSD is a symmetric and smoothed version of KL divergence, and is always finite and bounded.
+    This is a symmetric, smoothed version of KL divergence that is always
+    finite and bounded. Jensen–Shannon *distance* is the square root of this
+    value: ``JS_distance(p, q) = sqrt(JSD(p, q))``. This function deliberately
+    returns the divergence, not the distance.
 
     Properties:
     ----------
-    - JSD is in the range [0, sqrt(log_b(2))] where b is the log base.
+    - JSD is in the range [0, log_b(2)] where b is the log base.
     - JSD(p, q) = 0 iff p == q
-    - JSD(p, q) = sqrt(log_b(2)) indicates maximal divergence, which occurs when p and q are completely disjoint distributions (e.g., p=[1,0], q=[0,1]).
-    - So only if base=2, result is in [0, 1].
+    - JSD(p, q) = log_b(2) indicates maximal divergence, which occurs when p
+      and q have disjoint support (e.g., p=[1, 0], q=[0, 1]).
+    - With base=2, JSD is in [0, 1].
     - JSD is symmetric: JSD(p, q) = JSD(q, p)
 
-    Parameters
-    ----------
     Args:
-        model_probs: np.ndarray of shape [N, C]
+        pred_probs: np.ndarray of shape [N, C]
             Model predicted class probability distributions.
         human_probs: np.ndarray of shape [N, C]
             Human annotation distributions per instance.
         base : float
-            Logarithm base for normalization. If base=2, JSD is in [0, 1].
+            Logarithm base for normalization. If base=2, JSD is in [0, 1];
+            pass None to retain natural-log units.
         epsilon : float
             Small value to avoid zero probabilities.
 
-    Returns
-    -------
-    np.ndarray
-        Per-sample JSD values, shape [N].
+    Returns:
+        Per-sample Jensen–Shannon divergence values, shape [N].
     """
     m = 0.5 * (pred_probs + human_probs)
 
@@ -275,7 +275,7 @@ def compute_jsd(
     if base is not None:
         jsd = jsd / np.log(base)
 
-    return np.sqrt(jsd)
+    return jsd
 
 
 def compute_pojsd(
@@ -284,21 +284,22 @@ def compute_pojsd(
     *,
     epsilon: float = 1e-12,
 ) -> np.ndarray:
-    """Per-sample probability-of-Jensen--Shannon-divergence score.
+    """Compute per-sample positively oriented JSD (PO-JSD) scores.
 
-    This follows the ``poJSD`` convention used by the external
-    ``train-eval-hlv`` implementation: it is ``1 - JSD`` with base-2
-    logarithms and *without* the square root. It is therefore a similarity
-    score in ``[0, 1]`` where higher is better, unlike :func:`compute_jsd`,
-    which returns Jensen--Shannon distance where lower is better.
+    PO-JSD is the positively oriented form of Jensen--Shannon divergence, not
+    a probability. For each sample it is ``1 - JSD(p, q)`` using base-2
+    logarithms and no square root; the dataset-level PO-JSD is the mean of
+    these values. It is a similarity score in ``[0, 1]`` where higher is
+    better, unlike :func:`compute_jsd`, which returns Jensen--Shannon
+    divergence where lower is better.
     """
-    js_distance = compute_jsd(
+    jsd = compute_jsd(
         pred_probs,
         human_probs,
         base=2,
         epsilon=epsilon,
     )
-    return 1.0 - np.square(js_distance)
+    return 1.0 - jsd
 
 """
 Kemal's soft f1 https://arxiv.org/abs/2502.01891
@@ -383,12 +384,17 @@ def compute_soft_micro_f1(
     float
         Soft micro F1 score in [0, 1].
     """
-    pred_probs = validate_and_fix_probs(pred_probs, name="pred_probs", atol=atol)
-    human_probs = validate_and_fix_probs(human_probs, name="human_probs", atol=atol)
+    pred_probs = validate_and_fix_probs(pred_probs, name="pred_probs", atol=atol, require_normalized=False)
+    human_probs = validate_and_fix_probs(human_probs, name="human_probs", atol=atol, require_normalized=False)
+
+    if pred_probs.shape != human_probs.shape:
+        raise ValueError("pred_probs and human_probs must have the same shape")
 
     min_sum = np.minimum(pred_probs, human_probs).sum()
     denom = (pred_probs + human_probs).sum()
-    return 2.0 * min_sum / denom
+    if pred_probs.shape != human_probs.shape:
+        raise ValueError("pred_probs and human_probs must have the same shape")
+    return float(2.0 * min_sum / denom) if denom else 1.0
 
 
 def compute_soft_macro_f1(
@@ -438,16 +444,62 @@ def compute_soft_macro_f1(
     float
         Soft macro F1 score in [0, 1].
     """
-    pred_probs = validate_and_fix_probs(pred_probs, name="pred_probs", atol=atol)
-    human_probs = validate_and_fix_probs(human_probs, name="human_probs", atol=atol)
+    pred_probs = validate_and_fix_probs(pred_probs, name="pred_probs", atol=atol, require_normalized=False)
+    human_probs = validate_and_fix_probs(human_probs, name="human_probs", atol=atol, require_normalized=False)
 
     # sums over examples i, per class k
+    if pred_probs.shape != human_probs.shape:
+        raise ValueError("pred_probs and human_probs must have the same shape")
     min_sum = np.minimum(pred_probs, human_probs).sum(axis=0)   # shape: (K,)
     denom   = (pred_probs + human_probs).sum(axis=0)            # shape: (K,)
 
-    f1_per_class = (2.0 * min_sum) / denom
-    
+    f1_per_class = np.divide(2.0 * min_sum, denom, out=np.ones_like(denom, dtype=float), where=denom != 0)
+
     return float(f1_per_class.mean())
+
+
+def _validate_multilabel_probs(pred_probs, human_probs):
+    pred_probs = validate_and_fix_probs(pred_probs, name="pred_probs", require_normalized=False)
+    human_probs = validate_and_fix_probs(human_probs, name="human_probs", require_normalized=False)
+    if pred_probs.shape != human_probs.shape:
+        raise ValueError("pred_probs and human_probs must have the same shape")
+    if np.any(pred_probs > 1) or np.any(human_probs > 1):
+        raise ValueError("Multilabel probabilities must be in [0, 1]")
+    return pred_probs, human_probs
+
+
+def compute_multilabel_pojsd(pred_probs, human_probs, *, epsilon=1e-12):
+    """Mean PO-JSD after treating every instance--label value as Bernoulli."""
+    pred_probs, human_probs = _validate_multilabel_probs(pred_probs, human_probs)
+    pred = np.stack((pred_probs, 1.0 - pred_probs), axis=-1).reshape(-1, 2)
+    human = np.stack((human_probs, 1.0 - human_probs), axis=-1).reshape(-1, 2)
+    return float(np.mean(compute_pojsd(pred, human, epsilon=epsilon)))
+
+
+def compute_multilabel_entropy_correlation(pred_probs, human_probs, *, base=2.0):
+    """Macro-average per-label Pearson correlation of Bernoulli entropies."""
+    if base <= 0 or base == 1:
+        raise ValueError("base must be positive and different from 1")
+    pred_probs, human_probs = _validate_multilabel_probs(pred_probs, human_probs)
+    def entropy(probs):
+        complement = 1.0 - probs
+        result = np.zeros_like(probs)
+        positive = probs > 0
+        result[positive] -= probs[positive] * np.log(probs[positive])
+        positive_complement = complement > 0
+        result[positive_complement] -= complement[positive_complement] * np.log(complement[positive_complement])
+        return result / np.log(base)
+    pred_entropy, human_entropy = entropy(pred_probs), entropy(human_probs)
+    correlations = []
+    for label_idx in range(pred_probs.shape[1]):
+        pred_label, human_label = pred_entropy[:, label_idx], human_entropy[:, label_idx]
+        if len(pred_label) < 2 or np.isclose(np.std(pred_label), 0.0) or np.isclose(np.std(human_label), 0.0):
+            correlations.append(0.0)
+        else:
+            correlations.append(float(np.corrcoef(pred_label, human_label)[0, 1]))
+    return float(np.mean(np.clip(correlations, -1.0, 1.0)))
+
+
 
 
 """
@@ -520,6 +572,58 @@ def compute_distance_correlation(
     q = validate_and_fix_probs(human_probs, name="human_probs", atol=atol)
 
     return float(dcor.distance_correlation(p, q, exponent=exponent))
+
+
+"""
+Entropy correlation for human label variation (HLV) evaluation.
+
+Sources:
+- Uma et al. (2020): entropy correlation for comparing model and human
+  disagreement/uncertainty.
+- Kurniawan et al. (2026): included in systematic HLV metric comparison.
+
+Unlike ``compute_distance_correlation``, this metric computes Pearson
+correlation over per-instance Shannon entropy values. It measures alignment
+in uncertainty, not full class-distribution geometry.
+"""
+def compute_entropy_correlation(
+    pred_probs: np.ndarray,
+    human_probs: np.ndarray,
+    *,
+    base: float = 2.0,
+    atol: float = 1e-6,
+) -> float:
+    """Compute Pearson correlation between model and human entropies.
+
+    A high score means the model identifies the same examples as more or less
+    uncertain than humans do. It does not establish class-level distributional
+    agreement, so report it together with PO-JSD or TVD.
+
+    Returns ``0.0`` when correlation is undefined (fewer than two examples or
+    either entropy vector has zero variance), keeping evaluation output finite.
+    """
+    pred_probs = validate_and_fix_probs(pred_probs, name="pred_probs", atol=atol)
+    human_probs = validate_and_fix_probs(human_probs, name="human_probs", atol=atol)
+    if pred_probs.shape != human_probs.shape:
+        raise ValueError("pred_probs and human_probs must have the same shape")
+    if base <= 0 or base == 1:
+        raise ValueError("base must be positive and different from 1")
+
+    def _entropy(probs: np.ndarray) -> np.ndarray:
+        log_probs = np.zeros_like(probs)
+        positive = probs > 0
+        log_probs[positive] = np.log(probs[positive])
+        return -np.sum(probs * log_probs, axis=1) / np.log(base)
+
+    pred_entropy = _entropy(pred_probs)
+    human_entropy = _entropy(human_probs)
+    if (
+        len(pred_entropy) < 2
+        or np.isclose(np.std(pred_entropy), 0.0)
+        or np.isclose(np.std(human_entropy), 0.0)
+    ):
+        return 0.0
+    return float(np.corrcoef(pred_entropy, human_entropy)[0, 1])
 
 
 def compute_euclidean_distance(

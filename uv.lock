@@ -1192,66 +1192,6 @@ wheels = [
 ]
 
 [[package]]
-name = "hlv-toolkits"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "accelerate" },
-    { name = "datasets" },
-    { name = "dcor" },
-    { name = "ipykernel" },
-    { name = "jupyter" },
-    { name = "matplotlib" },
-    { name = "numpy" },
-    { name = "plotly" },
-    { name = "pytest" },
-    { name = "python-ternary" },
-    { name = "scipy" },
-    { name = "seaborn" },
-    { name = "sentencepiece" },
-    { name = "torch" },
-    { name = "transformers" },
-    { name = "wandb" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "accelerate" },
-    { name = "pytest" },
-    { name = "wandb" },
-]
-plot = [
-    { name = "matplotlib" },
-    { name = "python-ternary" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "accelerate", specifier = ">=0.26.0" },
-    { name = "accelerate", marker = "extra == 'dev'", specifier = ">=0.26.0" },
-    { name = "datasets", specifier = ">=4.5.0" },
-    { name = "dcor", specifier = ">=0.7" },
-    { name = "ipykernel", specifier = ">=7.3.0" },
-    { name = "jupyter", specifier = ">=1.1.1" },
-    { name = "matplotlib", specifier = ">=3.10.8" },
-    { name = "matplotlib", marker = "extra == 'plot'", specifier = ">=3.8.0" },
-    { name = "numpy", specifier = ">=1.26.0" },
-    { name = "plotly", specifier = ">=6.5.2" },
-    { name = "pytest", specifier = ">=9.0.2" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.2" },
-    { name = "python-ternary", specifier = ">=1.0.8" },
-    { name = "python-ternary", marker = "extra == 'plot'", specifier = ">=1.0.8" },
-    { name = "scipy", specifier = ">=1.11.0,<1.14.0" },
-    { name = "seaborn", specifier = ">=0.13.2" },
-    { name = "sentencepiece", specifier = ">=0.2.0" },
-    { name = "torch", specifier = ">=2.6.0,<2.7.0" },
-    { name = "transformers", specifier = ">=4.57.6" },
-    { name = "wandb", specifier = ">=0.24.0" },
-    { name = "wandb", marker = "extra == 'dev'", specifier = ">=0.16.0" },
-]
-provides-extras = ["dev", "plot"]
-
-[[package]]
 name = "httpcore"
 version = "1.0.9"
 source = { registry = "https://pypi.org/simple" }
@@ -4202,6 +4142,66 @@ sdist = { url = "https://files.pythonhosted.org/packages/69/99/a6ca3beb3ccacb41f
 wheels = [
     { url = "https://files.pythonhosted.org/packages/eb/dc/ad025c1ee131eba60c69f4dd5779b18fcf1e6b21a343e2162a84d5d133c7/soupsieve-2.9.2-py3-none-any.whl", hash = "sha256:8089a26fd974ca7a1f30276d3d8492ab266ab15af581642dfe8aa162e0c1c823", size = 37370, upload-time = "2026-08-07T00:57:23.524Z" },
 ]
+
+[[package]]
+name = "spinda"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "accelerate" },
+    { name = "datasets" },
+    { name = "dcor" },
+    { name = "ipykernel" },
+    { name = "jupyter" },
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "plotly" },
+    { name = "pytest" },
+    { name = "python-ternary" },
+    { name = "scipy" },
+    { name = "seaborn" },
+    { name = "sentencepiece" },
+    { name = "torch" },
+    { name = "transformers" },
+    { name = "wandb" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "accelerate" },
+    { name = "pytest" },
+    { name = "wandb" },
+]
+plot = [
+    { name = "matplotlib" },
+    { name = "python-ternary" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "accelerate", specifier = ">=0.26.0" },
+    { name = "accelerate", marker = "extra == 'dev'", specifier = ">=0.26.0" },
+    { name = "datasets", specifier = ">=4.5.0" },
+    { name = "dcor", specifier = ">=0.7" },
+    { name = "ipykernel", specifier = ">=7.3.0" },
+    { name = "jupyter", specifier = ">=1.1.1" },
+    { name = "matplotlib", specifier = ">=3.10.8" },
+    { name = "matplotlib", marker = "extra == 'plot'", specifier = ">=3.8.0" },
+    { name = "numpy", specifier = ">=1.26.0" },
+    { name = "plotly", specifier = ">=6.5.2" },
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.2" },
+    { name = "python-ternary", specifier = ">=1.0.8" },
+    { name = "python-ternary", marker = "extra == 'plot'", specifier = ">=1.0.8" },
+    { name = "scipy", specifier = ">=1.11.0,<1.14.0" },
+    { name = "seaborn", specifier = ">=0.13.2" },
+    { name = "sentencepiece", specifier = ">=0.2.0" },
+    { name = "torch", specifier = ">=2.6.0,<2.7.0" },
+    { name = "transformers", specifier = ">=4.57.6" },
+    { name = "wandb", specifier = ">=0.24.0" },
+    { name = "wandb", marker = "extra == 'dev'", specifier = ">=0.16.0" },
+]
+provides-extras = ["dev", "plot"]
 
 [[package]]
 name = "stack-data"

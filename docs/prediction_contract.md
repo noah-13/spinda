@@ -1,6 +1,6 @@
 # Prediction contract
 
-`hlv_toolkits.scripts.evaluate` is model-agnostic: it evaluates a JSONL
+`hlv_toolkits.scripts.evaluate` is model-agnostic: it evaluates a JSON
 prediction file produced by this toolkit or by any external system. It does
 not load external model checkpoints.
 
@@ -8,29 +8,31 @@ not load external model checkpoints.
 
 Evaluation requires both of the following:
 
-1. A prediction JSONL file following the record format below.
+1. A prediction JSON file following the record format below.
 2. Either a processed dataset directory containing `dataset.json` and the
-   requested split (normally `test.jsonl`), or a lightweight external
-   ground-truth JSONL file. The dataset manifest is the source of truth for
+   requested split (normally `test.json`), or a lightweight external
+   ground-truth JSON file. The dataset manifest is the source of truth for
    the task, class order, and human labels when using `--data_dir`.
 
 For example, to evaluate an external model on ChaosNLI:
 
 ```bash
 uv run python -m hlv_toolkits.scripts.evaluate \
-  --predictions external_predictions.jsonl \
+  --predictions external_predictions.json \
   --data_dir data/processed/text_pair/chaosnli/snli/0 \
   --ground_truth_split test \
   --output_file results/external_model.json
 ```
 
-## External ground-truth JSONL
+## External ground-truth JSON
 
 To evaluate without a repository dataset, pass `--ground_truth` instead of
-`--data_dir`. Write one JSON object per example:
+`--data_dir`. Write a top-level JSON array of example objects:
 
 ```json
-{"id":"example-0001","label":1,"human_dist":[0.10,0.75,0.15]}
+[
+  {"id":"example-0001","label":1,"human_dist":[0.10,0.75,0.15]}
+]
 ```
 
 - `id` and zero-based integer `label` are required.
@@ -43,18 +45,20 @@ To evaluate without a repository dataset, pass `--ground_truth` instead of
 
 ```bash
 uv run python -m hlv_toolkits.scripts.evaluate \
-  --predictions external_predictions.jsonl \
-  --ground_truth external_ground_truth.jsonl \
+  --predictions external_predictions.json \
+  --ground_truth external_ground_truth.json \
   --no-plot
 ```
 
-## Prediction JSONL
+## Prediction JSON
 
-Write one JSON object per example. The required fields are `id`,
+Write a top-level JSON array. Each object requires `id`,
 `outputs.probs`, and `outputs.pred`:
 
 ```json
-{"id":"example-0001","outputs":{"probs":[0.10,0.75,0.15],"pred":1}}
+[
+  {"id":"example-0001","outputs":{"probs":[0.10,0.75,0.15],"pred":1}}
+]
 ```
 
 - `id` must exactly match the ID in the evaluated dataset split.
@@ -67,6 +71,24 @@ Write one JSON object per example. The required fields are `id`,
 This toolkit's `predict` command emits the same format, with additional
 `task`, `split`, and `source` fields. Thus a toolkit prediction can be passed
 to `evaluate` unchanged.
+
+## Multidimensional prediction JSON
+
+For manifests with format `text_pair_multidimensional_label_distribution` or
+`single_text_multidimensional_label_distribution`, `predict` emits one categorical
+output per level. Pass that JSON to `evaluate` unchanged:
+
+```json
+[
+  {"id":"example-0001","outputs":{"dimensions":{"level1":{"probs":[0.10,0.90],"pred":1},"level2":{"probs":[0.75,0.25],"pred":0},"level3":{"probs":[0.20,0.80],"pred":1}}}}
+]
+```
+
+- Each manifest-defined dimension requires `probs` and `pred`.
+- Each probability-vector order is the matching `level_labels.<level>` order
+  in `dataset.json`.
+- Evaluation reports metrics for every level and an unweighted mean under
+  `overall`.
 
 ## Optional metadata
 
@@ -83,4 +105,4 @@ with `--data_dir` instead.
 
 The toolkit provides prediction for checkpoints trained by this repository.
 For models trained elsewhere, use their native inference code to produce the
-JSONL file above, then use this toolkit only for evaluation.
+JSON file above, then use this toolkit only for evaluation.

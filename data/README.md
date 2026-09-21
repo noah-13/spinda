@@ -12,29 +12,29 @@ data/
     snli/
   processed/
     snli/
-      train.jsonl
-      dev.jsonl
-      test.jsonl
+      train.json
+      dev.json
+      test.json
     text_pair/
       chaosnli/
         0/
           dataset.json
-          train.jsonl
-          dev.jsonl
-          test.jsonl
+          train.json
+          dev.json
+          test.json
         ...
         9/
           dataset.json
-          train.jsonl
-          dev.jsonl
-          test.jsonl
+          train.json
+          dev.json
+          test.json
     discogem.jsonl
     single_text/
       md_agreement/
         dataset.json
-        train.jsonl
-        dev.jsonl
-        test.jsonl
+        train.json
+        dev.json
+        test.json
   cache/
 ```
 
@@ -42,7 +42,7 @@ Guidelines:
 
 - Put downloaded or cloned source datasets in `data/external/`.
 - Put derived splits and intermediate artifacts in `data/processed/`.
-- Prepare paper-compatible DiscoGeM datasets with `uv run python -m hlv_toolkits.scripts.prepare_discogem_annotation_labels`. It downloads the 2.0 archive if absent, uses `MV_dist` to retain original annotation vote counts, excludes `norel`, and writes separate English and multilingual level1, level2, and level3 directories under `data/processed/text_pair/discogem/`. It also writes the named `text_pair_multilevel_label_distribution` format under `data/processed/text_pair/discogem/{english,multilingual}/multilevel/`, with all hierarchy levels in each record.
+- Prepare paper-compatible DiscoGeM datasets with `uv run python -m hlv_toolkits.scripts.prepare_discogem_annotation_labels`. It downloads the 2.0 archive if absent, uses `MV_dist` to retain original annotation vote counts, excludes `norel`, and writes separate English and multilingual level1, level2, and level3 directories under `data/processed/text_pair/discogem/`. It also writes the named `text_pair_multidimensional_label_distribution` format under `data/processed/text_pair/discogem/{english,multilingual}/multidimensional/`, with all hierarchy levels in each record.
 - The multilingual directories merge `en`, `de`, `fr`, and `cs`; IDs are language-prefixed to remain unique.
 - Put caches, temporary files, and local scratch data in `data/cache/`.
 - Do not commit large dataset files to git.
@@ -54,12 +54,12 @@ For reusable hard-label text-pair training, preprocess any dataset into one dire
 ```text
 my_dataset/
   dataset.json
-  train.jsonl
-  dev.jsonl
-  test.jsonl  # optional unless predicting/evaluating test
+  train.json
+  dev.json
+  test.json  # optional unless predicting/evaluating test
 ```
 
-`dataset.json` fixes the class order and can specify the label mode. `label_mode: "hard"` uses one integer label per row:
+`dataset.json` fixes the class order and can specify the label mode. Every split file is a top-level JSON array of records. `label_mode: "hard"` uses one integer label per record:
 
 ```json
 {"format": "text_pair_label_distribution", "label_mode": "hard", "labels": ["not_duplicate", "duplicate"]}
@@ -82,7 +82,7 @@ my_dataset/
 
 `label_mode: "soft_to_hard"` requires two or more `annotation_labels` and converts their vote counts with argmax. It rejects hard examples; it is the only permitted soft-to-hard conversion.
 
-Only `annotation_labels` affects label parsing. Every other JSONL field, regardless of name (including `meta`, `label`, or `label_distribution`), is ignored. If `label_mode` is omitted, one annotation means hard and two or more means soft, and the reader emits a warning. `labels` may be omitted, in which case the reader infers the class range from the training annotations, uses `label0`, `label1`, ... and emits a warning. Every annotation index must be in `[0, len(labels) - 1]` when labels are provided.
+Only `annotation_labels` affects label parsing. Every other record field, regardless of name (including `meta`, `label`, or `label_distribution`), is ignored. If `label_mode` is omitted, one annotation means hard and two or more means soft, and the reader emits a warning. `labels` may be omitted, in which case the reader infers the class range from the training annotations, uses `label0`, `label1`, ... and emits a warning. Every annotation index must be in `[0, len(labels) - 1]` when labels are provided.
 
 Training uses `label_training_strategy`. The CLI can override the manifest `label_mode`:
 
@@ -115,8 +115,8 @@ Train from direct paths. `format` and `train_path` are required; `dev_path` is o
 ```json
 {
   "format": "text_pair_label_distribution",
-  "train_path": "data/my_dataset/train.jsonl",
-  "dev_path": "data/my_dataset/dev.jsonl",
+  "train_path": "data/my_dataset/train.json",
+  "dev_path": "data/my_dataset/dev.json",
   "labels": ["not_duplicate", "duplicate"],
   "label_mode": "soft",
   "model": "roberta-base",
@@ -158,8 +158,8 @@ The equivalent direct CLI requires the same two data fields:
 ```bash
 uv run python -m hlv_toolkits.scripts.train \
   --format text_pair_label_distribution \
-  --train_path data/my_dataset/train.jsonl \
-  --dev_path data/my_dataset/dev.jsonl \
+  --train_path data/my_dataset/train.json \
+  --dev_path data/my_dataset/dev.json \
   --labels not_duplicate duplicate \
   --label_mode soft \
   --model roberta-base --output_dir outputs/my_dataset
@@ -167,7 +167,7 @@ uv run python -m hlv_toolkits.scripts.train \
 
 If `dev_path` is omitted, training emits a warning, does not evaluate or select a best checkpoint, and writes the last epoch model to `final_model`.
 
-Use `hlv_toolkits.scripts.prepare_discogem_annotation_labels` to download and export the current DiscoGeM datasets. It writes independent `discogem/english/level{1,2,3}` and `discogem/multilingual/level{1,2,3}` soft-label datasets, each with `dataset.json`, `train.jsonl`, `dev.jsonl`, and `test.jsonl`.
+Use `hlv_toolkits.scripts.prepare_discogem_annotation_labels` to download and export the current DiscoGeM datasets. It writes independent `discogem/english/level{1,2,3}` and `discogem/multilingual/level{1,2,3}` soft-label datasets, each with `dataset.json`, `train.json`, `dev.json`, and `test.json`.
 
 
 ## MD-Agreement
@@ -182,7 +182,7 @@ This invokes the versioned Python download step (`hlv_toolkits.scripts.download_
 
 ## MFRC
 
-MFRC (Moral Foundations Reddit Corpus) is exported as `single_text_multilabel_annotation_distribution`, because a Reddit comment can receive several moral-foundation labels from one annotator. Its JSONL rows retain those per-annotator sets in `annotation_label_sets`; the reader derives independent per-label vote probabilities (they intentionally do not sum to one).
+MFRC (Moral Foundations Reddit Corpus) is exported as `single_text_multilabel_annotation_distribution`, because a Reddit comment can receive several moral-foundation labels from one annotator. Its JSON rows retain those per-annotator sets in `annotation_label_sets`; the reader derives independent per-label vote probabilities (they intentionally do not sum to one).
 
 ```bash
 bash scripts/mfrc.sh
@@ -194,7 +194,21 @@ The exporter downloads `USC-MOLA-Lab/MFRC` through `datasets`, groups the source
 
 ### MFRC training
 
-MFRC uses eight independent sigmoid outputs. Use `label_mode: "soft_to_hard"` with `ce` for the per-label majority-vote baseline, or `label_mode: "soft"` with `ce`, `mse`, `jsd`, or `rel`. In MFRC, `ce` is binary cross-entropy; `rel` expands one full multi-hot target per annotator. `soft_to_hard` trains those thresholded hard targets but retains original vote probabilities for dev `eval_tvd` model selection.
+MFRC uses eight independent sigmoid outputs. Use `label_mode: "soft_to_hard"` with `ce` for the per-label majority-vote baseline, or `label_mode: "soft"` with `ce`, `mse`, `jsd`, or `rel`. In MFRC, `ce` is binary cross-entropy; `rel` expands one full multi-hot target per annotator. `soft_to_hard` trains those thresholded hard targets but retains original vote probabilities for dev evaluation. All multilabel-classification runs select the checkpoint with the highest `eval_soft_micro_f1` by default. Use `--multilabel_metric_for_best_model` for direct training or `MULTILABEL_METRIC_FOR_BEST_MODEL` in the shared sweep launcher to override this (for example, `multilabel_pojsd`).
+
+### MFRC prediction and evaluation
+
+Run predictions and standard test evaluation for every completed MFRC seed with:
+
+```bash
+GPU=0 MAX_PARALLEL=8 bash scripts/mfrc_predict_eval_parallel.sh
+```
+
+The launcher shares the one selected physical GPU across prediction jobs, using
+available GPU memory to gate parallel launches. Evaluation begins as soon as its
+prediction completes and runs without plots. It reuses complete artifacts by
+default; set `FORCE=1` to regenerate predictions and evaluations, or
+`FORCE_EVAL=1` to rerun evaluation only.
 
 ```bash
 uv run python -m hlv_toolkits.scripts.train \

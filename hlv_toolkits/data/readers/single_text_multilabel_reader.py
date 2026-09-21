@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import List, Optional, Sequence
 
 from hlv_toolkits.data.readers.base import BaseReader
+from hlv_toolkits.data.json_io import load_records, split_path
 from hlv_toolkits.data.tie_breaking import binary_threshold
 from hlv_toolkits.data.schemas import SingleTextMultilabelDistributionSample, Split
 
@@ -28,7 +29,7 @@ class SingleTextMultilabelJSONLReader(BaseReader):
                 raise FileNotFoundError(f"Dataset manifest not found: {manifest_path}") from exc
             if manifest.get("format") != SINGLE_TEXT_MULTILABEL_TASK:
                 raise ValueError(f"{manifest_path} must contain format={SINGLE_TEXT_MULTILABEL_TASK!r}.")
-            self.train_path, self.dev_path, self.test_path = self.data_dir / "train.jsonl", self.data_dir / "dev.jsonl", self.data_dir / "test.jsonl"
+            self.train_path, self.dev_path, self.test_path = split_path(self.data_dir, "train"), split_path(self.data_dir, "dev"), split_path(self.data_dir, "test")
             source_labels, self.source = manifest.get("labels"), str(self.data_dir)
         else:
             if data_format != SINGLE_TEXT_MULTILABEL_TASK:
@@ -49,13 +50,7 @@ class SingleTextMultilabelJSONLReader(BaseReader):
         if path is None or not path.is_file():
             raise FileNotFoundError(f"Dataset split not found: {path}")
         samples, seen = [], set()
-        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            if not line.strip():
-                continue
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError as exc:
-                raise ValueError(f"Invalid JSON on line {line_number} in {path}: {exc}") from exc
+        for line_number, row in enumerate(load_records(path, kind="dataset records"), 1):
             identifier, text, votes = row.get("id"), row.get("text"), row.get("annotation_label_sets")
             if not isinstance(identifier, str) or not identifier or identifier in seen or not isinstance(text, str) or not text.strip():
                 raise ValueError(f"Line {line_number} in {path} must contain a unique id and non-empty text.")

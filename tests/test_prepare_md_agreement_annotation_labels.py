@@ -24,14 +24,16 @@ def test_prepare_md_agreement_preserves_votes_and_splits(tmp_path):
 
     output = tmp_path / "processed"
     assert prepare_md_agreement(raw, output) == {"train": 1, "dev": 1, "test": 1}
+    row = json.loads((output / "train.json").read_text(encoding="utf-8"))[0]
     manifest = json.loads((output / "dataset.json").read_text(encoding="utf-8"))
-    row = json.loads((output / "train.jsonl").read_text(encoding="utf-8"))
+    row = json.loads((output / "train.json").read_text(encoding="utf-8"))[0]
+
 
     assert manifest["format"] == "single_text_label_distribution"
     assert manifest["label_mode"] == "soft"
     assert manifest["labels"] == ["not_offensive", "offensive"]
-    assert manifest["train_path"] == str(output / "train.jsonl")
-    assert manifest["dev_path"] == str(output / "dev.jsonl")
+    assert manifest["train_path"] == str(output / "train.json")
+    assert manifest["dev_path"] == str(output / "dev.json")
     assert set(manifest) == {"format", "label_mode", "labels", "train_path", "dev_path"}
     assert row == {
         "id": "md_agreement:train:1",
@@ -87,8 +89,8 @@ def test_md_agreement_soft_to_hard_retains_distribution_for_dev_metrics(tmp_path
 
     sample = SingleTextClassificationJSONLReader(
         data_format="single_text_label_distribution",
-        train_path=str(output / "train.jsonl"),
-        dev_path=str(output / "dev.jsonl"),
+        train_path=str(output / "train.json"),
+        dev_path=str(output / "dev.json"),
         labels=["not_offensive", "offensive"],
         label_mode="soft_to_hard",
     ).load_train()[0]

@@ -15,12 +15,13 @@ from pathlib import Path
 from typing import Any
 
 from hlv_toolkits.scripts.download_data import download_chaosnli
+from hlv_toolkits.data.json_io import write_records
 
 
 LABELS = ["entailment", "neutral", "contradiction"]
 SUBSET_FILENAMES = {
-    "snli": "chaosNLI_snli.jsonl",
-    "mnli_m": "chaosNLI_mnli_m.jsonl",
+    "snli": "chaosNLI_snli.json",
+    "mnli_m": "chaosNLI_mnli_m.json",
 }
 NUM_FOLDS = 10
 DEV_PORTION = 0.1
@@ -84,7 +85,7 @@ def _load_rows(input_path: Path) -> list[dict[str, Any]]:
 
 
 def _write_split(rows: list[dict[str, Any]], output_path: Path) -> None:
-    output_path.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n", encoding="utf-8")
+    write_records(output_path, rows)
 
 
 def _split_kfold_train_dev_test(
@@ -138,7 +139,7 @@ def _split_kfold_train_dev_test(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Convert ChaosNLI SNLI to annotation_labels text-pair JSONL.")
+    parser = argparse.ArgumentParser(description="Convert ChaosNLI SNLI to annotation_labels text-pair JSON.")
     parser.add_argument("--input_dir", type=Path, default=Path("data/external/chaosnli"))
     parser.add_argument("--output_dir", type=Path, default=Path("data/processed/text_pair/chaosnli"))
     parser.add_argument(
@@ -169,13 +170,13 @@ def main() -> None:
             fold_dir.mkdir(parents=True, exist_ok=True)
             manifest = {
                 "format": "text_pair_label_distribution",
-                "train_path": str(fold_dir / "train.jsonl"),
-                "dev_path": str(fold_dir / "dev.jsonl"),
+                "train_path": str(fold_dir / "train.json"),
+                "dev_path": str(fold_dir / "dev.json"),
                 "labels": LABELS,
             }
             (fold_dir / "dataset.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
             for split, split_rows in splits.items():
-                output_path = fold_dir / f"{split}.jsonl"
+                output_path = fold_dir / f"{split}.json"
                 _write_split(split_rows, output_path)
                 print(f"Wrote ChaosNLI {subset} fold {fold} {split} ({len(split_rows)} rows) -> {output_path}")
 

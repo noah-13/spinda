@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Iterator, List, Literal, Optional, Sequence
 
 from hlv_toolkits.data.readers.base import BaseReader
+from hlv_toolkits.data.json_io import load_records, split_path
 from hlv_toolkits.data.tie_breaking import tied_argmax
 from hlv_toolkits.data.schemas import Split, TextPairClassificationSample, TextPairDistributionSample
 
@@ -46,9 +47,9 @@ class TextPairClassificationJSONLReader(BaseReader):
         manifest_labels: Optional[List[str]] = None
         if self.data_dir is not None:
             manifest_label_mode, manifest_labels = self._load_manifest()
-            self.train_path = self.data_dir / "train.jsonl"
-            self.dev_path = self.data_dir / "dev.jsonl"
-            self.test_path = self.data_dir / "test.jsonl"
+            self.train_path = split_path(self.data_dir, "train")
+            self.dev_path = split_path(self.data_dir, "dev")
+            self.test_path = split_path(self.data_dir, "test")
             if data_format is not None and data_format != TEXT_PAIR_TASK:
                 raise ValueError(f"format must be {TEXT_PAIR_TASK!r}.")
             self.source = str(self.data_dir)
@@ -100,7 +101,7 @@ class TextPairClassificationJSONLReader(BaseReader):
             raise ValueError(f"{manifest_path} label_mode must be one of: hard, soft, soft_to_hard.")
         if label_mode is None:
             warnings.warn(
-                f"{manifest_path} does not define label_mode; detecting it from train.jsonl.",
+                f"{manifest_path} does not define label_mode; detecting it from train.json.",
                 UserWarning,
                 stacklevel=2,
             )
@@ -133,14 +134,7 @@ class TextPairClassificationJSONLReader(BaseReader):
             raise FileNotFoundError(f"Dataset split not found: {path}")
         records: list[tuple[int, dict[str, Any]]] = []
         max_annotation = -1
-        with path.open(encoding="utf-8") as handle:
-            for line_number, line in enumerate(handle, 1):
-                if not line.strip():
-                    continue
-                try:
-                    record = json.loads(line)
-                except json.JSONDecodeError as exc:
-                    raise ValueError(f"Invalid JSON on line {line_number} in {path}: {exc}") from exc
+        for line_number, record in enumerate(load_records(path, kind="dataset records"), 1):
                 self._record_source_label_mode(record, path, line_number)
                 annotations = record["annotation_labels"]
                 max_annotation = max(max_annotation, max(annotations))
@@ -175,7 +169,7 @@ class TextPairClassificationJSONLReader(BaseReader):
     ) -> LabelMode:
         if requested_mode is None:
             warnings.warn(
-                f"Detected {source_mode} labels from train.jsonl; using label_mode={source_mode!r}.",
+                f"Detected {source_mode} labels from train.json; using label_mode={source_mode!r}.",
                 UserWarning,
                 stacklevel=3,
             )
@@ -251,7 +245,7 @@ class TextPairClassificationJSONLReader(BaseReader):
             # of the soft dataset rather than being rejected as a hard row.
             one_vote_soft = self.source_label_mode == "soft" and self.label_mode in {"soft", "soft_to_hard"} and row_mode == "hard"
             if row_mode != self.source_label_mode and not one_vote_soft:
-                raise ValueError(f"Line {line_number} in {path} label type does not match train.jsonl.")
+                raise ValueError(f"Line {line_number} in {path} label type does not match train.json.")
             if not required_fields.issubset(record):
                 raise ValueError(f"Line {line_number} in {path} must contain {sorted(required_fields)}.")
             if not isinstance(record["id"], str) or not record["id"] or record["id"] in seen_ids:

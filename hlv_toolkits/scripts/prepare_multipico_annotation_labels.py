@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from hlv_toolkits.scripts.download_data import download_multipico
+from hlv_toolkits.data.json_io import write_records
 
 LABELS = ["not_ironic", "ironic"]
 
@@ -48,8 +49,8 @@ def prepare_multipico(splits: Mapping[str, Mapping[str, Mapping[str, Any]]], out
         "format": "text_pair_label_distribution",
         "label_mode": "soft",
         "labels": LABELS,
-        "train_path": str(output_dir / "train.jsonl"),
-        "dev_path": str(output_dir / "dev.jsonl"),
+        "train_path": str(output_dir / "train.json"),
+        "dev_path": str(output_dir / "dev.json"),
     }
     (output_dir / "dataset.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     counts = {}
@@ -59,32 +60,33 @@ def prepare_multipico(splits: Mapping[str, Mapping[str, Mapping[str, Any]]], out
             raise ValueError(f"MultiPICo {split!r} split must be an object keyed by item ID.")
         source = Path(f"MP_{split}.json")
         count = 0
-        with (output_dir / f"{split}.jsonl").open("w", encoding="utf-8") as handle:
-            for item_id, row in rows.items():
-                if not isinstance(row, Mapping):
-                    raise ValueError(f"{source} item {item_id} must be an object.")
-                text, info = row.get("text"), row.get("other_info")
-                if not isinstance(text, Mapping) or not isinstance(info, Mapping):
-                    raise ValueError(f"{source} item {item_id} must contain text and other_info objects.")
-                if row.get("split") != split:
-                    raise ValueError(f"{source} item {item_id} has split={row.get('split')!r}, expected {split!r}.")
-                row_language = _value(row, "lang", source, str(item_id))
-                if language is not None and row_language != language:
-                    continue
-                record = {
-                    "id": f"multipico:{split}:{item_id}",
-                    "text_a": _text(text.get("post"), "post", source, str(item_id)),
-                    "text_b": _text(text.get("reply"), "reply", source, str(item_id)),
-                    "annotation_labels": _labels(row, source, str(item_id)),
-                    "meta": {
-                        "source": _value(info, "source", source, str(item_id)),
-                        "language": row_language,
-                        "language_variety": _value(info, "language_variety", source, str(item_id)),
-                        "source_id": str(item_id),
-                    },
-                }
-                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-                count += 1
+        records = []
+        for item_id, row in rows.items():
+            if not isinstance(row, Mapping):
+                raise ValueError(f"{source} item {item_id} must be an object.")
+            text, info = row.get("text"), row.get("other_info")
+            if not isinstance(text, Mapping) or not isinstance(info, Mapping):
+                raise ValueError(f"{source} item {item_id} must contain text and other_info objects.")
+            if row.get("split") != split:
+                raise ValueError(f"{source} item {item_id} has split={row.get('split')!r}, expected {split!r}.")
+            row_language = _value(row, "lang", source, str(item_id))
+            if language is not None and row_language != language:
+                continue
+            record = {
+                "id": f"multipico:{split}:{item_id}",
+                "text_a": _text(text.get("post"), "post", source, str(item_id)),
+                "text_b": _text(text.get("reply"), "reply", source, str(item_id)),
+                "annotation_labels": _labels(row, source, str(item_id)),
+                "meta": {
+                    "source": _value(info, "source", source, str(item_id)),
+                    "language": row_language,
+                    "language_variety": _value(info, "language_variety", source, str(item_id)),
+                    "source_id": str(item_id),
+                },
+            }
+            records.append(record)
+            count += 1
+        write_records(output_dir / f"{split}.json", records)
         counts[split] = count
     return counts
 

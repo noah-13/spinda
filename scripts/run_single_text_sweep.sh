@@ -12,6 +12,9 @@ OUT_ROOT="${OUT_ROOT:?Set OUT_ROOT to the output root.}"
 TRAINING_CONFIG="${TRAINING_CONFIG:-configs/training.json}"
 GPU="${GPU:-0}"
 FORCE="${FORCE:-0}"
+DEV_METRIC="${MULTILABEL_METRIC_FOR_BEST_MODEL:-${SOFT_LABEL_METRIC_FOR_BEST_MODEL:-}}"
+declare -a DEV_METRIC_ARGS=()
+[[ -z "$DEV_METRIC" ]] || DEV_METRIC_ARGS=(--multilabel_metric_for_best_model "$DEV_METRIC")
 STATUS_FILE_NAME="run-status.txt"
 if [[ -n "${SEEDS_OVERRIDE:-}" ]]; then
   read -r -a SEEDS <<< "$SEEDS_OVERRIDE"
@@ -48,7 +51,7 @@ run() {
   if uv run python -m hlv_toolkits.scripts.train \
     --config "$TRAINING_CONFIG" "$DATASET_CONFIG" \
     --label_mode "$label_mode" --label_training_strategy "$strategy" \
-    --model "$model" --device "$DEVICE" --output_dir "$output_dir" --seeds "$seed" "${resume_args[@]}"; then
+    --model "$model" --device "$DEVICE" --output_dir "$output_dir" --seeds "$seed" "${resume_args[@]}" "${DEV_METRIC_ARGS[@]}"; then
     printf 'completed %s\n' "$(date --iso-8601=seconds)" >> "$status_file"
   else
     printf 'failed %s\n' "$(date --iso-8601=seconds)" >> "$status_file"; return 1

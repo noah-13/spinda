@@ -31,8 +31,8 @@ DATA_FORMAT_SPECS = {
     "text_pair_label_distribution": ("text_pair", "classification"),
     "single_text_label_distribution": ("single_text", "classification"),
     "single_text_multilabel_annotation_distribution": ("single_text_multilabel", "multilabel_classification"),
-    "text_pair_multilevel_label_distribution": ("multilevel", "multilevel_classification"),
-    "single_text_multilevel_label_distribution": ("multilevel", "multilevel_classification"),
+    "text_pair_multidimensional_label_distribution": ("multilevel", "multilevel_classification"),
+    "single_text_multidimensional_label_distribution": ("multilevel", "multilevel_classification"),
 }
 
 
@@ -103,18 +103,18 @@ def main() -> None:
         type=str,
         default="text_pair",
         choices=["text_pair", "single_text", "single_text_multilabel", "multilevel"],
-        help="Training data source; text_pair and multilevel use JSONL dataset contracts",
+        help="Training data source; text_pair and multilevel use JSON dataset contracts",
     )
     parser.add_argument(
         "--format",
         dest="data_format",
         type=str,
         default=None,
-        choices=["text_pair_label_distribution", "single_text_label_distribution", "single_text_multilabel_annotation_distribution", "text_pair_multilevel_label_distribution", "single_text_multilevel_label_distribution"],
-        help="Required format for direct JSONL training data.",
+        choices=["text_pair_label_distribution", "single_text_label_distribution", "single_text_multilabel_annotation_distribution", "text_pair_multidimensional_label_distribution", "single_text_multidimensional_label_distribution"],
+        help="Required format for direct JSON training data.",
     )
-    parser.add_argument("--train_path", type=str, default=None, help="Required JSONL training file for direct text-pair training.")
-    parser.add_argument("--dev_path", type=str, default=None, help="Optional JSONL development file; omit to train without evaluation.")
+    parser.add_argument("--train_path", type=str, default=None, help="Required JSON training file for direct text-pair training.")
+    parser.add_argument("--dev_path", type=str, default=None, help="Optional JSON development file; omit to train without evaluation.")
     parser.add_argument("--labels", type=str, nargs="+", default=None, help="Optional label names in numeric-index order.")
     parser.add_argument(
         "--level_labels",
@@ -172,8 +172,16 @@ def main() -> None:
         "--soft_label_metric_for_best_model",
         type=str,
         default="tvd",
-        choices=["kl_divergence", "tvd", "accuracy"],
-        help="Metric used to select best checkpoint when --use_soft_labels is enabled",
+        choices=["accuracy", "tvd", "kl_divergence", "soft_micro_f1", "soft_macro_f1"],
+        help="Dev metric used to select the best checkpoint for non-multilabel soft-label training",
+    )
+
+    parser.add_argument(
+        "--multilabel_metric_for_best_model",
+        type=str,
+        default="soft_micro_f1",
+        choices=["accuracy", "soft_micro_f1", "soft_macro_f1", "multilabel_pojsd", "multilabel_entropy_correlation"],
+        help="Dev metric used to select the best checkpoint for multilabel classification",
     )
 
     # Output configuration
@@ -248,7 +256,7 @@ def main() -> None:
     direct_dataset_options = (args.data_format, args.train_path, args.dev_path, args.labels, args.level_labels, args.label_mode)
     if any(value is not None for value in direct_dataset_options):
         if args.data_source not in {"text_pair", "single_text", "single_text_multilabel", "multilevel"}:
-            raise ValueError("format/train_path/dev_path/labels/level_labels/label_mode are only valid for direct JSONL training.")
+            raise ValueError("format/train_path/dev_path/labels/level_labels/label_mode are only valid for direct JSON training.")
     if args.data_format not in DATA_FORMAT_SPECS:
         raise ValueError("format is required and must identify a supported dataset contract.")
     args.data_source, args.head_type = DATA_FORMAT_SPECS[args.data_format]
@@ -318,22 +326,22 @@ def main() -> None:
         train_samples = reader.load_train()
         eval_samples = reader.load_dev() if reader.has_dev else None
     elif args.data_source == "multilevel":
-        if args.data_format not in {"text_pair_multilevel_label_distribution", "single_text_multilevel_label_distribution"}:
-            raise ValueError("--format text_pair_multilevel_label_distribution or single_text_multilevel_label_distribution is required for multilevel JSONL training.")
+        if args.data_format not in {"text_pair_multidimensional_label_distribution", "single_text_multidimensional_label_distribution"}:
+            raise ValueError("--format text_pair_multidimensional_label_distribution or single_text_multidimensional_label_distribution is required for multilevel JSON training.")
         if not args.train_path:
-            raise ValueError("--train_path is required for multilevel JSONL training.")
+            raise ValueError("--train_path is required for multilevel JSON training.")
         if not multilevel_head:
             raise ValueError("A multilevel label-distribution format requires a multilevel head.")
         if args.label_mode not in {None, "soft", "hard", "soft_to_hard"}:
             raise ValueError("Multilevel label-distribution formats support label_mode soft, hard, or soft_to_hard.")
         args.use_soft_labels = args.label_mode == "soft"
-        reader_cls = SingleTextMultilevelJSONLReader if args.data_format == "single_text_multilevel_label_distribution" else TextPairMultilevelJSONLReader
+        reader_cls = SingleTextMultilevelJSONLReader if args.data_format == "single_text_multidimensional_label_distribution" else TextPairMultilevelJSONLReader
         reader = reader_cls(data_path=args.train_path)
         if args.level_labels is not None:
             configured_labels = reader._validate_level_labels(args.level_labels)
             if configured_labels != reader.level_labels:
                 raise ValueError("level_labels must exactly match the dataset manifest.")
-        multilevel_label_sizes = tuple(len(reader.level_labels[level]) for level in reader.LEVEL_ORDER)
+        multilevel_label_sizes = {level: len(labels) for level, labels in reader.level_labels.items()}
         train_samples = reader.load_train()
         if args.dev_path:
             eval_reader = reader_cls(
@@ -392,6 +400,7 @@ def main() -> None:
             use_soft_eval_metrics=(args.data_source in {"text_pair", "single_text", "multilevel", "single_text_multilabel"} and args.label_mode == "soft_to_hard"),
             soft_label_loss=args.soft_label_loss,
             soft_label_metric_for_best_model=args.soft_label_metric_for_best_model,
+            multilabel_metric_for_best_model=args.multilabel_metric_for_best_model,
             head_type=args.head_type,
             multilevel_label_sizes=multilevel_label_sizes,
             output_dir=str(seed_output_dir),

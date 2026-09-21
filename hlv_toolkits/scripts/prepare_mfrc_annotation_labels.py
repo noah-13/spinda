@@ -8,6 +8,8 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Iterable
 
+from hlv_toolkits.data.json_io import write_records
+
 MFRC_LABELS = ["Care", "Equality", "Proportionality", "Loyalty", "Authority", "Purity", "Thin Morality", "Non-Moral"]
 MFRC_LABEL_TO_ID = {label: index for index, label in enumerate(MFRC_LABELS)}
 
@@ -39,16 +41,14 @@ def prepare_mfrc(rows: Iterable[dict[str, Any]], output_dir: Path) -> dict[str, 
             raise ValueError("Every MFRC row requires non-empty text, subreddit, and bucket strings.")
         grouped.setdefault((text, subreddit, bucket), []).append(row)
     output_dir.mkdir(parents=True, exist_ok=True)
-    manifest = {"format": "single_text_multilabel_annotation_distribution", "labels": MFRC_LABELS, "train_path": str(output_dir / "train.jsonl"), "dev_path": str(output_dir / "dev.jsonl")}
+    manifest = {"format": "single_text_multilabel_annotation_distribution", "labels": MFRC_LABELS, "train_path": str(output_dir / "train.json"), "dev_path": str(output_dir / "dev.json")}
     (output_dir / "dataset.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     records = {split: [] for split in ("train", "dev", "test")}
     for ordinal, ((text, subreddit, bucket), annotations) in enumerate(grouped.items()):
         split = _split_for("\u241f".join((text, subreddit, bucket)))
         records[split].append({"id": f"mfrc:{split}:{ordinal}", "text": text, "annotation_label_sets": [_label_set(row.get("annotation")) for row in annotations], "meta": {"subreddit": subreddit, "bucket": bucket, "annotators": [row.get("annotator") for row in annotations], "confidence": [row.get("confidence") for row in annotations]}})
     for split, split_records in records.items():
-        with (output_dir / f"{split}.jsonl").open("w", encoding="utf-8") as handle:
-            for record in split_records:
-                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        write_records(output_dir / f"{split}.json", split_records)
     return {split: len(split_records) for split, split_records in records.items()}
 
 

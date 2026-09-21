@@ -1,16 +1,20 @@
-# HLV Toolkits
+# SPINDA
 
-HLV Toolkits is a toolkit for natural language inference (NLI) and distributional-label experiments. It provides data download and preprocessing, model training, prediction, evaluation, visualization, and experiment dashboards.
+> Simple Prediction and Interpretation of Data with Human Label Variation
+
+SPINDA is a toolkit for training, predicting, evaluating, and interpreting NLP models with Human Label Variation (HLV). It supports single-label, multi-label, and multi-dimensional annotations; distribution-aware metrics; and disagreement-stratified, instance-level analysis.
+
+Start with [the paper reproduction guide](docs/reproducing_paper.md), [the configuration reference](docs/configuration_reference.md), and [the prediction contract](docs/prediction_contract.md). See [the paper-to-code consistency record](docs/paper_consistency.md) for release scope and metadata still needed.
 
 ## Datasets
 
 - **SNLI**: hard-label NLI data loaded through Hugging Face `datasets`.
 - **ChaosNLI**: converted from its official SNLI JSONL into the shared text-pair `annotation_labels` format.
 - **DiscoGeM 2.0**: English, German, French, and Czech discourse-relation data with hierarchical labels and human distributions.
-- **Processed JSONL**: the normalized format used by the training and evaluation scripts.
+- **Processed JSON**: the normalized format used by the training and evaluation scripts.
 - **MFRC**: Reddit moral-foundation annotations in a dedicated multi-label, per-annotator single-text format.
 - **MultiPICo**: multilingual post/reply irony annotations aggregated into per-conversation label distributions.
-- **Text-pair classification JSONL**: a fixed public format for training on user-provided hard-label datasets; see [data/README.md](data/README.md#public-text-pair-classification-format).
+- **Text-pair classification JSON**: a fixed public format for training on user-provided hard-label datasets; see [data/README.md](data/README.md#public-text-pair-classification-format).
 
 The default data locations are:
 
@@ -35,13 +39,32 @@ Future datasets should follow the same pattern: one dataset launcher and a short
 
 ## Prediction and evaluation
 
-Predictions from this toolkit and external models use the same JSONL contract.
+Predictions from this toolkit and external models use the same JSON contract.
 `predict` is for checkpoints trained by this repository; `evaluate` is
 model-agnostic and accepts any prediction file that follows the contract.
 Evaluation accepts either the processed dataset directory (including
-`dataset.json`) or a lightweight external ground-truth JSONL file. See
+`dataset.json`) or a lightweight external ground-truth JSON file. See
 [docs/prediction_contract.md](docs/prediction_contract.md) for the required
 fields, optional ignored metadata, and external-model examples.
+
+See [docs/configuration_reference.md](docs/configuration_reference.md) for all training, prediction, evaluation, and analysis options.
+
+
+For categorical soft-label data, add `--analysis` to write an entropy-stratified
+report and a CSV with TVD, JSD, KL, cross-entropy, and L2 error for every
+instance. The default low/medium/high groups use empirical entropy tertiles.
+Use `--disagreement-groups N` for N quantile groups, or provide explicit
+normalized-entropy cutoffs with `--disagreement-boundaries`:
+
+```bash
+uv run python -m hlv_toolkits.scripts.evaluate \
+  --predictions outputs/predictions.json --data_dir data/processed/text_pair/chaosnli \
+  --analysis --disagreement-boundaries 0.33 0.67
+```
+
+The analysis JSON contains group-level accuracy and mean distribution errors;
+the adjacent `__instance_errors.csv` supports sorting and filtering the
+individual model--human mismatches.
 
 ## Models and training heads
 
@@ -50,9 +73,9 @@ Models are loaded with Hugging Face `AutoTokenizer`, `AutoModel`, or `AutoModelF
 The training entry point is `hlv_toolkits.scripts.train`. Supported heads are:
 
 - `classification`
-- `multilevel_classification` for DiscoGeM
+- `multidimensional_classification` for DiscoGeM
 
-For the current DiscoGeM experiments, `classification` and `multilevel_classification` use a linear output layer followed by softmax for human distributions. The available label-training strategies are:
+For the current DiscoGeM experiments, `classification` and `multidimensional_classification` use a linear output layer followed by softmax for human distributions. The available label-training strategies are:
 
 - `ce`
 - `mse` — MSE between the softmax-normalized prediction and the human distribution
@@ -60,6 +83,13 @@ For the current DiscoGeM experiments, `classification` and `multilevel_classific
 - `rel` — repeated-label CE for text-pair data with raw `annotation_labels`
 
 Model selection can use `accuracy`, `tvd`, or `kl_divergence`. Label space and label mode come from each direct dataset manifest.
+
+For normalized categorical human-label distributions, evaluation reports these
+metrics by default: `accuracy`, `tvd`, `jsd`, `kl`, `ce`, `l2`,
+`entropy_correlation`, and `distance_correlation`. Related compatibility
+metrics such as `l1`, `pojsd`, and `soft_accuracy` remain available by passing
+`distribution_metrics` to `Evaluator`, but are not included in the default
+result table.
 
 ## Environment and versions
 
@@ -129,17 +159,17 @@ All commands below should be run from the repository root and through `uv run`, 
 - MultiPICo multilingual: `GPU=0 bash scripts/multipico/multilingual.sh`
 - MultiPICo English-only: `GPU=0 bash scripts/multipico/english.sh`
 - Multilingual DiscoGeM (multilingual encoders only, all levels by default): `GPU=0 bash scripts/discogem/multilingual.sh`
-- DiscoGeM multilevel (English and multilingual by default): `GPU=0 bash scripts/discogem/multilevel.sh`; use `VARIANTS=english` or `VARIANTS=multilingual` to run one variant.
+- DiscoGeM multidimensional (English and multilingual by default): `GPU=0 bash scripts/discogem/multilevel.sh`; use `VARIANTS=english` or `VARIANTS=multilingual` to run one variant.
 
 Set `LEVEL=level1`, `level2`, or `level3` with either entry to restrict the run to one level.
 
 
 ## Dataset preparation
 
-Prepare direct JSONL datasets with their format-specific exporters:
+Prepare direct JSON datasets with their format-specific exporters:
 
 ```bash
-# DiscoGeM: text-pair and multilevel data
+# DiscoGeM: text-pair and multidimensional data
 uv run python -m hlv_toolkits.scripts.prepare_discogem_annotation_labels
 
 # ChaosNLI: text-pair data
@@ -152,7 +182,7 @@ bash scripts/md_agreement.sh
 ```
 
 Train using each generated `dataset.json`; direct data uses either
-`text_pair_label_distribution`, `text_pair_multilevel_label_distribution`, or
+`text_pair_label_distribution`, `text_pair_multidimensional_label_distribution`, or
 `single_text_label_distribution`. The runnable dataset entry scripts are under
 `scripts/` and `scripts/discogem/`.
 
@@ -176,7 +206,7 @@ development-set TVD.
 
 ## Humans-and-Domains / TGeGUM
 
-The official sentence-level TGeGUM splits are exported as three independent soft-label tasks (`genre`, `topic1`, and `topic2`) under `data/processed/single_text/humans_and_domains/`, plus one shared three-head experiment under `data/processed/single_text/humans_and_domains/multilevel/`. The latter maps `level1=genre`, `level2=topic1`, and `level3=topic2`; only the two topic heads form a true hierarchy. All runs select checkpoints with development-set TVD.
+The official sentence-level TGeGUM splits are exported as three independent soft-label tasks (`genre`, `topic1`, and `topic2`) under `data/processed/single_text/humans_and_domains/`, plus one shared three-head experiment under `data/processed/single_text/humans_and_domains/multidimensional/`. The latter maps `level1=genre`, `level2=topic1`, and `level3=topic2`; only the two topic heads form a true hierarchy. All runs select checkpoints with development-set TVD.
 
 ```bash
 GPU=0 bash scripts/humans_and_domains.sh

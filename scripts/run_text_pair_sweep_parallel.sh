@@ -12,6 +12,7 @@ OUT_ROOT="${OUT_ROOT:?Set OUT_ROOT to the output root.}"
 TRAINING_CONFIG="${TRAINING_CONFIG:-configs/training.json}"
 GPU="${GPU:-0}"
 FORCE="${FORCE:-0}"
+REVERSE_ORDER="${REVERSE_ORDER:-0}"
 MAX_PARALLEL="${MAX_PARALLEL:-4}"
 AUTO_PARALLEL="${AUTO_PARALLEL:-1}"
 AUTO_MIN_FREE_MB="${AUTO_MIN_FREE_MB:-4096}"
@@ -24,6 +25,8 @@ AUTO_PEAK_JOB_MB=0
 AUTO_LAST_LAUNCH=0
 STATUS_FILE_NAME="run-status.txt"
 [[ "$MAX_PARALLEL" =~ ^[1-9][0-9]*$ ]] || { echo "MAX_PARALLEL must be positive." >&2; exit 2; }
+[[ "$REVERSE_ORDER" =~ ^[01]$ ]] || { echo "REVERSE_ORDER must be 0 or 1." >&2; exit 2; }
+command -v flock >/dev/null || { echo "flock is required for coordinated sweeps." >&2; exit 2; }
 if [[ -n "${SEEDS_OVERRIDE:-}" ]]; then
   read -r -a SEEDS <<< "$SEEDS_OVERRIDE"
 else
@@ -37,6 +40,36 @@ RUN_SPECS="${RUN_SPECS:-soft ce;soft mse;soft jsd;soft rel;soft_to_hard ce}"
 IFS=";" read -r -a MODELS <<< "$MODEL_SPECS"
 IFS=";" read -r -a RUNS <<< "$RUN_SPECS"
 
+reverse_array() {
+  local -n values="$1"
+  local -a reversed=()
+  local index
+  for ((index = ${#values[@]} - 1; index >= 0; index--)); do
+    reversed+=("${values[index]}")
+  done
+  values=("${reversed[@]}")
+}
+
+if [[ "$REVERSE_ORDER" == "1" ]]; then
+  reverse_array MODELS
+  reverse_array RUNS
+  reverse_array SEEDS
+fi
+
+latest_valid_checkpoint() {
+  local seed_output_dir="$1" checkpoint
+  while IFS= read -r checkpoint; do
+    # A checkpoint directory can be observed while Trainer is still writing it.
+    # Resuming from one without both state and weights fails immediately.
+    if [[ -f "$checkpoint/trainer_state.json" ]] && \
+       { [[ -f "$checkpoint/model.safetensors" ]] || [[ -f "$checkpoint/pytorch_model.bin" ]]; }; then
+      printf '%s\n' "$checkpoint"
+      return 0
+    fi
+  done < <(find "$seed_output_dir" -mindepth 1 -maxdepth 1 -type d -name 'checkpoint-*' -print | sort -V -r)
+  return 1
+}
+
 run() {
   local model="$1" label_mode="$2" strategy="$3" seed="$4"
   local safe_model="${model//\//_}"
@@ -44,14 +77,31 @@ run() {
   local seed_output_dir="$output_dir/seed_${seed}"
   local final_model_dir="$seed_output_dir/final_model"
   local status_file="$seed_output_dir/$STATUS_FILE_NAME"
+  # Keep the lock outside the seed directory so FORCE cannot unlink it.
+  local lock_file="$output_dir/.seed_${seed}.train.lock"
+  local lock_fd
   local resume_checkpoint=""; local -a resume_args=()
+
+  mkdir -p "$seed_output_dir"
+  # Separately launched forward/reverse sweeps coordinate through this per-seed lock.
+  exec {lock_fd}>"$lock_file"
+  while ! flock -n "$lock_fd"; do
+    if [[ -f "$final_model_dir/config.json" ]]; then
+      printf 'skipped completed %s\n' "$(date --iso-8601=seconds)" | tee -a "$status_file"
+      echo "Skipping completed run: $output_dir/seed_$seed"; return 0
+    fi
+    sleep 30
+  done
+
   if [[ "$FORCE" == "1" ]]; then
     rm -rf "$seed_output_dir"
+    mkdir -p "$seed_output_dir"
   elif [[ -f "$final_model_dir/config.json" ]]; then
     printf 'skipped completed %s\n' "$(date --iso-8601=seconds)" | tee -a "$status_file"
     echo "Skipping completed run: $output_dir/seed_$seed"; return 0
   elif [[ -d "$seed_output_dir" ]]; then
-    resume_checkpoint="$(find "$seed_output_dir" -mindepth 1 -maxdepth 1 -type d -name 'checkpoint-*' -printf '%f\t%p\n' | sort -V | tail -n 1 | cut -f 2-)"
+    resume_checkpoint="$(latest_valid_checkpoint "$seed_output_dir" || true)"
+    [[ -z "$resume_checkpoint" ]] || echo "Resuming from valid checkpoint: $resume_checkpoint"
   fi
   mkdir -p "$seed_output_dir"
   printf 'started %s\n' "$(date --iso-8601=seconds)" >> "$status_file"

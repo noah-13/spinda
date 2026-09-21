@@ -3,12 +3,13 @@ Evaluator for computing calibration metrics on NLI predictions.
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Collection, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
 from hlv_toolkits.data.schemas import (
     SingleTextDistributionSample,
+    SingleTextMultilabelDistributionSample,
     TextPairClassificationSample,
     TextPairDistributionSample,
     PredictionRecord,
@@ -16,6 +17,7 @@ from hlv_toolkits.data.schemas import (
 from hlv_toolkits.eval.metrics import (
     compute_tvd,
     compute_distance_correlation,
+    compute_entropy_correlation,
     compute_euclidean_distance,
     compute_jsd,
     compute_pojsd,
@@ -23,6 +25,8 @@ from hlv_toolkits.eval.metrics import (
     compute_cross_entropy,
     compute_soft_macro_f1,
     compute_soft_micro_f1,
+    compute_multilabel_entropy_correlation,
+    compute_multilabel_pojsd,
 )
 
 
@@ -35,6 +39,32 @@ class EvaluationArtifacts:
     true_labels: Optional[np.ndarray] = None
 
 
+DEFAULT_CATEGORICAL_DISTRIBUTION_METRICS = (
+    "accuracy",
+    "tvd",
+    "jsd",
+    "kl",
+    "ce",
+    "l2",
+    "entropy_correlation",
+    "distance_correlation",
+)
+"""The standard metrics reported for normalized, categorical distributions."""
+
+
+_CATEGORICAL_DISTRIBUTION_METRICS = frozenset(
+    {
+        *DEFAULT_CATEGORICAL_DISTRIBUTION_METRICS,
+        # Backward-compatible, mathematically derived metrics; opt-in only.
+        "l1",
+        "pojsd",
+        "soft_micro_f1",
+        "soft_accuracy",
+        "soft_macro_f1",
+    }
+)
+
+
 class Evaluator:
     """
     Evaluator for computing calibration metrics.
@@ -42,8 +72,48 @@ class Evaluator:
     Supports both single-label and distribution-based evaluation.
     """
 
-    def __init__(self) -> None:
-        pass
+    def __init__(
+        self,
+        distribution_metrics: Optional[Collection[str]] = None,
+    ) -> None:
+        """Create an evaluator with selected categorical distribution metrics.
+
+        The default is the standard seven-metric table. Derived and legacy
+        names such as ``l1``, ``pojsd``, and ``soft_accuracy`` are opt-in.
+        """
+        requested_metrics = (
+            DEFAULT_CATEGORICAL_DISTRIBUTION_METRICS
+            if distribution_metrics is None
+            else tuple(distribution_metrics)
+        )
+        unknown_metrics = set(requested_metrics) - _CATEGORICAL_DISTRIBUTION_METRICS
+        if unknown_metrics:
+            raise ValueError(
+                "Unsupported categorical distribution metrics: "
+                + ", ".join(sorted(unknown_metrics))
+            )
+        self.distribution_metrics = requested_metrics
+
+
+
+    @staticmethod
+    def validate_prediction_coverage(predictions: List[PredictionRecord], ground_truth: List[object]) -> None:
+        """Require a one-to-one mapping between prediction and gold IDs."""
+        prediction_ids = [prediction.id for prediction in predictions]
+        ground_truth_ids = [getattr(sample, "id") for sample in ground_truth]
+        if len(set(prediction_ids)) != len(prediction_ids):
+            raise ValueError("Predictions contain duplicate IDs.")
+        if len(set(ground_truth_ids)) != len(ground_truth_ids):
+            raise ValueError("Ground truth contains duplicate IDs.")
+        unknown_ids = set(prediction_ids) - set(ground_truth_ids)
+        missing_ids = set(ground_truth_ids) - set(prediction_ids)
+        if unknown_ids or missing_ids:
+            details = []
+            if unknown_ids:
+                details.append(f"unknown prediction IDs: {sorted(unknown_ids)[:3]}")
+            if missing_ids:
+                details.append(f"missing prediction IDs: {sorted(missing_ids)[:3]}")
+            raise ValueError("Prediction/ground-truth ID mismatch (" + "; ".join(details) + ").")
 
     def prepare_distribution_arrays(
         self,
@@ -75,10 +145,12 @@ class Evaluator:
             pred_label = pred.outputs.get("pred", -1)
             probs = pred.outputs.get("probs", [])
 
-            if pred_label < 0 or num_labels <= 0 or len(probs) != num_labels:
-                continue
+            if not isinstance(pred_label, int) or isinstance(pred_label, bool) or not isinstance(probs, list):
+                raise ValueError(f"Prediction {pred.id} must contain integer pred and list probs.")
+            if pred_label < 0 or pred_label >= num_labels or num_labels <= 0 or len(probs) != num_labels:
+                raise ValueError(f"Prediction {pred.id} has an invalid categorical output.")
             if len(gt.human_dist) != num_labels:
-                continue
+                raise ValueError(f"Ground truth {gt.id} has an invalid distribution length.")
 
             pred_probs_list.append(probs)
             human_probs_list.append(gt.human_dist)
@@ -115,10 +187,12 @@ class Evaluator:
             pred_label = pred.outputs.get("pred", -1)
             probs = pred.outputs.get("probs", [])
 
-            if pred_label < 0 or not isinstance(probs, list) or len(probs) == 0:
-                continue
+            if not isinstance(pred_label, int) or isinstance(pred_label, bool) or not isinstance(probs, list):
+                raise ValueError(f"Prediction {pred.id} must contain integer pred and list probs.")
+            if pred_label < 0 or len(probs) == 0:
+                raise ValueError(f"Prediction {pred.id} has an invalid categorical output.")
             if pred_label >= len(probs) or gt.label < 0 or gt.label >= len(probs):
-                continue
+                raise ValueError(f"Prediction {pred.id} or ground truth {gt.id} has an out-of-range label.")
 
             pred_labels.append(pred_label)
             true_labels.append(gt.label)
@@ -162,27 +236,85 @@ class Evaluator:
         soft_micro_f1 = compute_soft_micro_f1(pred_probs, human_probs)
         soft_macro_f1 = compute_soft_macro_f1(pred_probs, human_probs)
         distance_correlation = compute_distance_correlation(pred_probs, human_probs)
+        entropy_correlation = compute_entropy_correlation(pred_probs, human_probs)
         euclidean_distance = compute_euclidean_distance(pred_probs, human_probs)
         cross_entropy = compute_cross_entropy(human_probs, pred_probs)
 
-        return EvaluationArtifacts(
-            metrics={
+        all_metrics = {
                 "accuracy": float(accuracy),
                 "tvd": float(np.mean(tvd)),
+                # Manhattan/L1 is exactly 2 * TVD for categorical distributions.
+                "l1": float(2.0 * np.mean(tvd)),
                 "jsd": float(np.mean(jsd)),
                 "pojsd": float(np.mean(pojsd)),
                 "kl": float(np.mean(kl)),
                 "soft_micro_f1": float(soft_micro_f1),
+                # For normalized categorical distributions this equals 1 - TVD.
+                "soft_accuracy": float(soft_micro_f1),
                 "soft_macro_f1": float(soft_macro_f1),
                 "distance_correlation": float(distance_correlation),
+                "entropy_correlation": float(entropy_correlation),
                 # Keep result keys aligned with notebooks/metrics_tutorial.ipynb.
                 "l2": float(np.mean(euclidean_distance)),
                 "ce": float(np.mean(cross_entropy)),
-            },
+        }
+
+        return EvaluationArtifacts(
+            metrics={name: all_metrics[name] for name in self.distribution_metrics},
             pred_probs=pred_probs,
             human_probs=human_probs,
             pred_labels=pred_labels,
             true_labels=true_labels,
+        )
+
+    def evaluate_multilabel(
+        self, predictions: List[PredictionRecord], ground_truth: List[SingleTextMultilabelDistributionSample]
+    ) -> EvaluationArtifacts:
+        """Evaluate independent per-label probabilities and binary decisions."""
+        pred_probs, human_probs, pred_labels, true_labels = [], [], [], []
+        ground_truth_by_id = {sample.id: sample for sample in ground_truth}
+        for prediction in predictions:
+            sample = ground_truth_by_id[prediction.id]
+            probs, labels = prediction.outputs.get("probs"), prediction.outputs.get("pred")
+            width = len(sample.human_probs)
+            if not isinstance(probs, list) or not isinstance(labels, list) or len(probs) != width or len(labels) != width:
+                raise ValueError(f"Prediction {prediction.id} has an invalid multilabel output.")
+            if any(not isinstance(label, int) or isinstance(label, bool) or label not in {0, 1} for label in labels):
+                raise ValueError(f"Prediction {prediction.id} must use binary integer multilabel predictions.")
+            pred_probs.append(probs)
+            human_probs.append(sample.human_probs)
+            pred_labels.append(labels)
+            true_labels.append(sample.labels)
+
+        pred_probs_array = np.asarray(pred_probs, dtype=float)
+        human_probs_array = np.asarray(human_probs, dtype=float)
+        if not np.isfinite(pred_probs_array).all() or np.any((pred_probs_array < 0) | (pred_probs_array > 1)):
+            raise ValueError("Multilabel probabilities must be finite values in [0, 1].")
+        if not np.isfinite(human_probs_array).all() or np.any((human_probs_array < 0) | (human_probs_array > 1)):
+            raise ValueError("Ground-truth multilabel probabilities must be finite values in [0, 1].")
+        pred_labels_array = np.asarray(pred_labels, dtype=int)
+        true_labels_array = np.asarray(true_labels, dtype=int)
+        denominator = pred_labels_array.sum() + true_labels_array.sum()
+        micro_f1 = float(2 * np.logical_and(pred_labels_array, true_labels_array).sum() / denominator) if denominator else 1.0
+        macro_denominators = pred_labels_array.sum(axis=0) + true_labels_array.sum(axis=0)
+        macro_f1 = float(np.mean(np.divide(
+            2 * np.logical_and(pred_labels_array, true_labels_array).sum(axis=0),
+            macro_denominators,
+            out=np.zeros_like(macro_denominators, dtype=float),
+            where=macro_denominators != 0,
+        )))
+        return EvaluationArtifacts(
+            metrics={
+                "accuracy": float(np.all(pred_labels_array == true_labels_array, axis=-1).mean()),
+                "micro_f1": micro_f1,
+                "macro_f1": macro_f1,
+                "soft_micro_f1": float(compute_soft_micro_f1(pred_probs_array, human_probs_array)),
+                "soft_macro_f1": float(compute_soft_macro_f1(pred_probs_array, human_probs_array)),
+                "multilabel_pojsd": compute_multilabel_pojsd(pred_probs_array, human_probs_array),
+                "multilabel_entropy_correlation": compute_multilabel_entropy_correlation(pred_probs_array, human_probs_array),
+            },
+            pred_probs=pred_probs_array, human_probs=human_probs_array,
+            pred_labels=pred_labels_array, true_labels=true_labels_array,
         )
 
     def evaluate(
@@ -192,6 +324,14 @@ class Evaluator:
     ) -> EvaluationArtifacts:
         if len(ground_truth) == 0:
             return EvaluationArtifacts(metrics={})
+
+        self.validate_prediction_coverage(predictions, ground_truth)
+
+        if isinstance(ground_truth[0], SingleTextMultilabelDistributionSample):
+            multilabel_ground_truth = [sample for sample in ground_truth if isinstance(sample, SingleTextMultilabelDistributionSample)]
+            if len(multilabel_ground_truth) != len(ground_truth):
+                raise ValueError("Ground truth cannot mix multilabel and categorical samples.")
+            return self.evaluate_multilabel(predictions, multilabel_ground_truth)
 
         if isinstance(ground_truth[0], (TextPairDistributionSample, SingleTextDistributionSample)):
             return self.evaluate_with_distribution(

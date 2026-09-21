@@ -15,6 +15,7 @@ import tarfile
 from collections import Counter
 
 from hlv_toolkits.data.tie_breaking import tied_argmax
+from hlv_toolkits.data.json_io import write_records
 from fractions import Fraction
 from pathlib import Path
 
@@ -107,12 +108,12 @@ def _write_variant(rows: list[dict[str, str]], output_root: Path, variant: str, 
             "format": "text_pair_label_distribution",
             "label_mode": "soft",
             "labels": labels,
-            "train_path": str(output_dir / "train.jsonl"),
-            "dev_path": str(output_dir / "dev.jsonl"),
+            "train_path": str(output_dir / "train.json"),
+            "dev_path": str(output_dir / "dev.json"),
         }
         (output_dir / "dataset.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
         split_counts: Counter[str] = Counter()
-        handles = {split: (output_dir / f"{split}.jsonl").open("w", encoding="utf-8") for split in ("train", "dev", "test")}
+        records = {split: [] for split in ("train", "dev", "test")}
         try:
             for language in languages:
                 for row in rows:
@@ -120,7 +121,7 @@ def _write_variant(rows: list[dict[str, str]], output_root: Path, variant: str, 
                     text_a = (row.get(f"arg1_context_{language}") or "").strip()
                     text_b = (row.get(f"arg2_context_{language}") or "").strip()
                     distribution = (row.get(f"MV_dist_{language}") or "").strip()
-                    if split not in handles or not text_a or not text_b or not distribution:
+                    if split not in records or not text_a or not text_b or not distribution:
                         continue
                     votes = _votes(distribution, level)
                     if not votes:
@@ -129,11 +130,11 @@ def _write_variant(rows: list[dict[str, str]], output_root: Path, variant: str, 
                     if not sample_id:
                         continue
                     record = {"id": sample_id if variant == "english" else f"{language}:{sample_id}", "text_a": text_a, "text_b": text_b, "annotation_labels": votes}
-                    handles[split].write(json.dumps(record, ensure_ascii=False) + "\n")
+                    records[split].append(record)
                     split_counts[split] += 1
         finally:
-            for handle in handles.values():
-                handle.close()
+            for split, split_records in records.items():
+                write_records(output_dir / f"{split}.json", split_records)
         print(f"{variant}/{level}: train={split_counts['train']} dev={split_counts['dev']} test={split_counts['test']}")
 
 
@@ -142,15 +143,15 @@ def _write_multilevel_variant(rows: list[dict[str, str]], output_root: Path, var
     output_dir = output_root / "discogem" / variant / "multilevel"
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest = {
-        "format": "text_pair_multilevel_label_distribution",
+        "format": "text_pair_multidimensional_label_distribution",
         "label_mode": "soft",
         "level_labels": LABELS,
-        "train_path": str(output_dir / "train.jsonl"),
-        "dev_path": str(output_dir / "dev.jsonl"),
+        "train_path": str(output_dir / "train.json"),
+        "dev_path": str(output_dir / "dev.json"),
     }
     (output_dir / "dataset.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     split_counts: Counter[str] = Counter()
-    handles = {split: (output_dir / f"{split}.jsonl").open("w", encoding="utf-8") for split in ("train", "dev", "test")}
+    records = {split: [] for split in ("train", "dev", "test")}
     try:
         for language in languages:
             for row in rows:
@@ -159,7 +160,7 @@ def _write_multilevel_variant(rows: list[dict[str, str]], output_root: Path, var
                 text_b = (row.get(f"arg2_context_{language}") or "").strip()
                 distribution = (row.get(f"MV_dist_{language}") or "").strip()
                 sample_id = (row.get("itemid") or "").strip()
-                if split not in handles or not text_a or not text_b or not distribution or not sample_id:
+                if split not in records or not text_a or not text_b or not distribution or not sample_id:
                     continue
                 votes = {level: _votes(distribution, level) for level in LABELS}
                 if any(not level_votes for level_votes in votes.values()):
@@ -178,14 +179,14 @@ def _write_multilevel_variant(rows: list[dict[str, str]], output_root: Path, var
                     "text_a": text_a,
                     "text_b": text_b,
                     "hard_labels": hard_labels,
-                    "human_dists": human_dists,
-                    "meta": {"language": language, "annotation_votes": votes},
+                    "annotation_labels": votes,
+                    "meta": {"language": language},
                 }
-                handles[split].write(json.dumps(record, ensure_ascii=False) + "\n")
+                records[split].append(record)
                 split_counts[split] += 1
     finally:
-        for handle in handles.values():
-            handle.close()
+        for split, split_records in records.items():
+            write_records(output_dir / f"{split}.json", split_records)
     print(f"multilevel/{variant}: train={split_counts['train']} dev={split_counts['dev']} test={split_counts['test']}")
 
 

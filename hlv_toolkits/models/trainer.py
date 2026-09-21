@@ -7,7 +7,7 @@ import time
 from importlib.util import find_spec
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -28,6 +28,12 @@ from transformers.modeling_outputs import SequenceClassifierOutput
 from transformers.trainer_utils import EvalPrediction
 from transformers.utils import ModelOutput
 
+from hlv_toolkits.eval.metrics import (
+    compute_multilabel_entropy_correlation,
+    compute_multilabel_pojsd,
+    compute_soft_macro_f1,
+    compute_soft_micro_f1,
+)
 from hlv_toolkits.data.schemas import (
     MultilevelSample,
     TextPairClassificationSample,
@@ -84,7 +90,7 @@ def resolve_max_length(tokenizer, config, requested_max_length: int) -> int:
     return 512
 
 
-MULTILEVEL_LEVEL_ORDER = ("level1", "level2", "level3")
+MULTILEVEL_LEVEL_ORDER: tuple[str, ...] = ()
 MultilevelInputSample = Union[MultilevelSample, SingleTextMultilevelSample]
 
 
@@ -179,8 +185,9 @@ class TrainingConfig:
     # on evaluation so model selection can still use distributional metrics.
     use_soft_eval_metrics: bool = False
     soft_label_loss: str = "ce"  # choices: ce, mse, jsd, rel
-    soft_label_metric_for_best_model: str = "tvd"  # choices: kl_divergence, tvd, accuracy
-    multilevel_label_sizes: Optional[Tuple[int, int, int]] = None
+    soft_label_metric_for_best_model: str = "tvd"  # choices: accuracy, tvd, kl_divergence, soft_{micro,macro}_f1, multilabel_{pojsd,entropy_correlation}
+    multilabel_metric_for_best_model: str = "soft_micro_f1"  # checkpoint metric for every multilabel_classification task
+    multilevel_label_sizes: Optional[Dict[str, int]] = None
 
     # Data paths
     output_dir: str = "./outputs"
@@ -215,6 +222,11 @@ class TrainingConfig:
             )
         if self.soft_label_loss not in {"ce", "mse", "jsd", "rel"}:
             raise ValueError("label_training_strategy must be one of: ce, mse, jsd, rel")
+        multilabel_only_metrics = {"multilabel_pojsd", "multilabel_entropy_correlation"}
+        if self.multilabel_metric_for_best_model not in {"accuracy", "soft_micro_f1", "soft_macro_f1", *multilabel_only_metrics}:
+            raise ValueError("Unsupported multilabel_metric_for_best_model")
+        if self.soft_label_metric_for_best_model in multilabel_only_metrics and self.head_type != "multilabel_classification":
+            raise ValueError("Multilabel checkpoint metrics require head_type=multilabel_classification")
         if self.label_names is not None and len(self.label_names) != self.num_labels:
             raise ValueError("label_names must have exactly num_labels entries")
         report_to = []
@@ -242,8 +254,15 @@ class TrainingConfig:
         metric_for_best_model = "accuracy"
         greater_is_better = True
         if self.use_soft_labels or self.use_soft_eval_metrics:
-            metric_for_best_model = self.soft_label_metric_for_best_model
-            greater_is_better = metric_for_best_model == "accuracy"
+            metric_for_best_model = (
+                self.multilabel_metric_for_best_model
+                if self.head_type == "multilabel_classification"
+                else self.soft_label_metric_for_best_model
+            )
+            greater_is_better = metric_for_best_model in {
+                "accuracy", "soft_micro_f1", "soft_macro_f1",
+                "multilabel_pojsd", "multilabel_entropy_correlation",
+            }
 
         label_names = ["soft_labels"] if self.use_soft_eval_metrics else ["labels"]
         if self.head_type == "multilevel_classification":
@@ -300,13 +319,13 @@ class MultiLevelClassificationModel(nn.Module):
         super().__init__()
         self.backbone = backbone
         self.dropout = nn.Dropout(0.1)
-        if set(level_num_labels) != set(MULTILEVEL_LEVEL_ORDER) or any(size < 2 for size in level_num_labels.values()):
-            raise ValueError("level_num_labels must define at least two labels for level1, level2, and level3.")
+        if not level_num_labels or any(size < 2 for size in level_num_labels.values()):
+            raise ValueError("level_num_labels must define at least two labels for every dimension.")
         self.level_num_labels = dict(level_num_labels)
         self.classifiers = nn.ModuleDict(
             {
                 level: nn.Linear(hidden_size, self.level_num_labels[level])
-                for level in MULTILEVEL_LEVEL_ORDER
+                for level in self.level_num_labels
             }
         )
 
@@ -350,7 +369,7 @@ class MultiLevelClassificationModel(nn.Module):
         outputs = self.backbone(**backbone_kwargs)
         pooled = outputs.pooler_output if getattr(outputs, "pooler_output", None) is not None else outputs.last_hidden_state[:, 0]
         pooled = self.dropout(pooled)
-        logits = tuple(self.classifiers[level](pooled) for level in MULTILEVEL_LEVEL_ORDER)
+        logits = tuple(self.classifiers[level](pooled) for level in self.level_num_labels)
         return MultiLevelSequenceClassifierOutput(
             logits=logits,
             hidden_states=getattr(outputs, "hidden_states", None),
@@ -505,16 +524,20 @@ class HLVTrainer:
 
     def initialize_model(self) -> None:
         model_name = self.config.model_name_or_path
-        print(f"Loading tokenizer and model: {model_name}")
+        print(f"Initializing model: {model_name}", flush=True)
+        print("Loading tokenizer...", flush=True)
         self.tokenizer = load_tokenizer_with_fallback(model_name)
+        print("Loading pretrained model weights...", flush=True)
 
         if self.config.head_type == "multilevel_classification":
             level_sizes = self.config.multilevel_label_sizes
             if level_sizes is None:
                 raise ValueError("multilevel_label_sizes must come from the dataset manifest.")
+            global MULTILEVEL_LEVEL_ORDER
+            MULTILEVEL_LEVEL_ORDER = tuple(level_sizes)
             self.model = MultiLevelClassificationModel.from_pretrained(
                 model_name,
-                level_num_labels={level: size for level, size in zip(MULTILEVEL_LEVEL_ORDER, level_sizes)},
+                level_num_labels=level_sizes,
             )
         else:
             if self.config.num_labels < 2:
@@ -526,6 +549,7 @@ class HLVTrainer:
                 model_kwargs["id2label"] = {i: label for i, label in enumerate(self.config.label_names)}
                 model_kwargs["label2id"] = {label: i for i, label in enumerate(self.config.label_names)}
             self.model = AutoModelForSequenceClassification.from_pretrained(model_name, **model_kwargs)
+        print("Model initialization complete.", flush=True)
 
     def prepare_dataset(
         self,
@@ -579,7 +603,7 @@ class HLVTrainer:
                             raise ValueError(f"Missing {level} human_dist for sample {sample.id}.")
                         if self.config.multilevel_label_sizes is None:
                             raise ValueError("multilevel_label_sizes must come from the dataset manifest.")
-                        expected = self.config.multilevel_label_sizes[MULTILEVEL_LEVEL_ORDER.index(level)]
+                        expected = self.config.multilevel_label_sizes[level]
                         if len(dist) != expected:
                             raise ValueError(
                                 f"Expected {level} human_dist length {expected}, got {len(dist)} for sample {sample.id}."
@@ -624,9 +648,17 @@ class HLVTrainer:
             else:
                 data["labels"] = extract_labels(samples)  # type: ignore[arg-type]
                 if self.config.use_soft_eval_metrics:
-                    data["soft_labels"] = extract_soft_labels(samples)  # type: ignore[arg-type]
-                if self.config.head_type == "multilabel_classification" and self.config.use_soft_eval_metrics:
-                    data["soft_labels"] = [list(sample.human_probs) for sample in samples if isinstance(sample, SingleTextMultilabelDistributionSample)]
+                    if self.config.head_type == "multilabel_classification":
+                        # Multi-label samples store independent annotation
+                        # probabilities in ``human_probs``, rather than the
+                        # categorical ``human_dist`` used by single-label data.
+                        data["soft_labels"] = [
+                            list(sample.human_probs)
+                            for sample in samples
+                            if isinstance(sample, SingleTextMultilabelDistributionSample)
+                        ]
+                    else:
+                        data["soft_labels"] = extract_soft_labels(samples)  # type: ignore[arg-type]
             return Dataset.from_dict(data).map(tokenize_function, batched=True)
 
         def build_rel_dataset(samples: List[Union[TextPairClassificationSample, TextPairDistributionSample]]) -> Dataset:
@@ -665,18 +697,18 @@ class HLVTrainer:
             text_b: List[str] = []
             label_columns = {f"hard_labels_{level}": [] for level in MULTILEVEL_LEVEL_ORDER}
             for sample in samples:
-                votes = sample.meta.get("annotation_votes")
-                if not isinstance(votes, dict):
-                    raise ValueError(f"ReL requires annotation_votes for multilevel sample {sample.id}.")
+                votes = sample.annotation_labels
+                if not isinstance(votes, dict) or not votes:
+                    raise ValueError(f"ReL requires annotation_labels for multidimensional sample {sample.id}.")
                 level_votes = []
                 for level in MULTILEVEL_LEVEL_ORDER:
                     labels = votes.get(level)
                     if not isinstance(labels, list) or not labels:
-                        raise ValueError(f"ReL requires non-empty {level} annotation_votes for multilevel sample {sample.id}.")
+                        raise ValueError(f"ReL requires non-empty {level} multidimensional annotation_labels for multilevel sample {sample.id}.")
                     level_votes.append(labels)
                 vote_count = len(level_votes[0])
                 if any(len(labels) != vote_count for labels in level_votes[1:]):
-                    raise ValueError(f"Multilevel annotation_votes must have the same count at every level for sample {sample.id}.")
+                    raise ValueError(f"Multilevel multidimensional annotation_labels must have the same count at every level for sample {sample.id}.")
                 for vote_index in range(vote_count):
                     text_a.append(sample.text if isinstance(sample, SingleTextMultilevelSample) else sample.text_a)
                     text_b.append("" if isinstance(sample, SingleTextMultilevelSample) else sample.text_b)
@@ -712,6 +744,7 @@ class HLVTrainer:
         if self.model is None or self.tokenizer is None:
             self.initialize_model()
 
+        print("Preparing tokenized datasets...", flush=True)
         train_dataset, eval_dataset = self.prepare_dataset(train_samples, eval_samples)
 
         def _prepare_multilevel_predictions(predictions, labels):
@@ -771,11 +804,21 @@ class HLVTrainer:
                 pred_hard, target_hard = pred_probs >= 0.5, targets >= 0.5
                 denom = pred_hard.sum() + target_hard.sum()
                 micro_f1 = float(2 * np.logical_and(pred_hard, target_hard).sum() / denom) if denom else 1.0
+                macro_denominators = pred_hard.sum(axis=0) + target_hard.sum(axis=0)
+                macro_f1 = float(np.mean(np.divide(
+                    2 * np.logical_and(pred_hard, target_hard).sum(axis=0),
+                    macro_denominators,
+                    out=np.zeros_like(macro_denominators, dtype=float),
+                    where=macro_denominators != 0,
+                )))
                 accuracy = float(np.all(pred_hard == target_hard, axis=-1).mean())
-                tvd = float(np.abs(pred_probs - targets).mean())
-                eps = 1e-8
-                kl = float(np.mean(targets * np.log((targets + eps) / (pred_probs + eps)) + (1 - targets) * np.log((1 - targets + eps) / (1 - pred_probs + eps))))
-                return {"accuracy": accuracy, "micro_f1": micro_f1, "tvd": tvd, "kl_divergence": kl}
+                return {
+                    "accuracy": accuracy, "micro_f1": micro_f1, "macro_f1": macro_f1,
+                    "soft_micro_f1": compute_soft_micro_f1(pred_probs, targets),
+                    "soft_macro_f1": compute_soft_macro_f1(pred_probs, targets),
+                    "multilabel_pojsd": compute_multilabel_pojsd(pred_probs, targets),
+                    "multilabel_entropy_correlation": compute_multilabel_entropy_correlation(pred_probs, targets),
+                }
             if self.config.head_type == "multilevel_classification":
                 level_probs, level_labels = _prepare_multilevel_predictions(predictions, labels)
                 return _metrics_from_level_probs(level_probs, level_labels)
@@ -793,12 +836,17 @@ class HLVTrainer:
                 eps = 1e-8
                 kl_div = float(np.mean(np.sum(labels * (np.log(labels + eps) - np.log(pred_probs + eps)), axis=-1)))
                 tvd = float(np.mean(0.5 * np.sum(np.abs(pred_probs - labels), axis=-1)))
-                return {"accuracy": accuracy, "kl_divergence": kl_div, "tvd": tvd}
+                return {
+                    "accuracy": accuracy, "kl_divergence": kl_div,
+                    "soft_micro_f1": compute_soft_micro_f1(pred_probs, labels),
+                    "soft_macro_f1": compute_soft_macro_f1(pred_probs, labels),
+                }
 
             labels = np.asarray(labels)
             accuracy = float((pred_labels == labels).mean())
             return {"accuracy": accuracy}
 
+        print("Creating training loop...", flush=True)
         training_args = self.config.to_training_args()
         trainer = SoftLabelTrainer(
             model=self.model,
@@ -851,9 +899,13 @@ class HLVTrainer:
             level_num_labels = meta.get("level_num_labels")
             if level_num_labels is None:
                 raise ValueError("Saved multilevel model metadata is missing level_num_labels.")
+            if not isinstance(level_num_labels, dict) or not level_num_labels:
+                raise ValueError("Saved multilevel model metadata must define a non-empty level_num_labels mapping.")
+            global MULTILEVEL_LEVEL_ORDER
+            MULTILEVEL_LEVEL_ORDER = tuple(level_num_labels)
             self.model = MultiLevelClassificationModel.from_pretrained(
                 str(model_dir),
-                level_num_labels={level: int(level_num_labels[level]) for level in MULTILEVEL_LEVEL_ORDER},
+                level_num_labels={level: int(size) for level, size in level_num_labels.items()},
             )
         else:
             self.model = AutoModelForSequenceClassification.from_pretrained(model_dir)

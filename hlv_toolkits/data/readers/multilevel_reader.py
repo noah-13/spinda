@@ -3,12 +3,13 @@ import json
 from pathlib import Path
 from typing import Any, List, Mapping, Optional, Sequence
 from hlv_toolkits.data.readers.base import BaseReader
+from hlv_toolkits.data.json_io import load_records, split_path
 from hlv_toolkits.data.tie_breaking import tied_argmax
 from hlv_toolkits.data.schemas import MultilevelSample, Split
 
 class TextPairMultilevelJSONLReader(BaseReader):
     LEVEL_ORDER = ("level1", "level2", "level3")
-    DATA_FORMAT = "text_pair_multilevel_label_distribution"
+    DATA_FORMAT = "text_pair_multidimensional_label_distribution"
 
     def __init__(
         self,
@@ -23,6 +24,7 @@ class TextPairMultilevelJSONLReader(BaseReader):
         self.data_path = Path(data_path)
         manifest_labels = self._load_manifest_level_labels() if level_labels is None else level_labels
         self.level_labels = self._validate_level_labels(manifest_labels)
+        self.dimension_names = tuple(self.level_labels)
 
     def _load_manifest_level_labels(self) -> Any:
         manifest_path = (self.data_path if self.data_path.is_dir() else self.data_path.parent) / "dataset.json"
@@ -38,12 +40,13 @@ class TextPairMultilevelJSONLReader(BaseReader):
 
     @classmethod
     def _validate_level_labels(cls, level_labels: Any) -> dict[str, List[str]]:
-        if not isinstance(level_labels, Mapping) or set(level_labels) != set(cls.LEVEL_ORDER):
-            raise ValueError("dataset.json level_labels must contain exactly level1, level2, and level3.")
+        if not isinstance(level_labels, Mapping) or not level_labels:
+            raise ValueError("dataset.json level_labels must be a non-empty mapping of dimension names to label lists.")
         validated = {}
-        for level in cls.LEVEL_ORDER:
-            labels = level_labels[level]
-            if not isinstance(labels, Sequence) or isinstance(labels, str) or not labels:
+        for level, labels in level_labels.items():
+            if not isinstance(level, str) or not level:
+                raise ValueError("dataset.json dimension names must be non-empty strings.")
+            if not isinstance(labels, Sequence) or isinstance(labels, str) or len(labels) < 2:
                 raise ValueError(f"dataset.json level_labels[{level!r}] must be a non-empty list of strings.")
             if any(not isinstance(label, str) or not label for label in labels) or len(set(labels)) != len(labels):
                 raise ValueError(f"dataset.json level_labels[{level!r}] must contain unique, non-empty strings.")
@@ -51,33 +54,25 @@ class TextPairMultilevelJSONLReader(BaseReader):
         return validated
 
     def load_split(self, split: Split) -> List[MultilevelSample]:
-        path = self.data_path / f"{split}.jsonl" if self.data_path.is_dir() else self.data_path
+        path = split_path(self.data_path, str(split)) if self.data_path.is_dir() else self.data_path
         rows: List[MultilevelSample] = []
-        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            if not line.strip():
-                continue
-            p = json.loads(line)
+        for line_number, p in enumerate(load_records(path, kind="dataset records"), 1):
             row_split = "dev" if p.get("split") in {"valid", "validation"} else p.get("split", split)
             target = "dev" if split in {"valid", "validation"} else split
             if row_split != target:
                 continue
-            raw_distributions = dict(p.get("human_dists") or {})
-            if set(raw_distributions) != set(self.LEVEL_ORDER):
-                raise ValueError(f"Line {line_number} in {path} must contain distributions for all label levels.")
-            human_dists = {}
-            for level in self.LEVEL_ORDER:
-                distribution = raw_distributions[level]
-                if (
-                    not isinstance(distribution, list)
-                    or len(distribution) != len(self.level_labels[level])
-                    or any(isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0 for value in distribution)
-                    or abs(sum(distribution) - 1.0) > 1e-6
-                ):
-                    raise ValueError(
-                        f"Line {line_number} in {path} {level} distribution must contain "
-                        f"{len(self.level_labels[level])} non-negative probabilities summing to 1."
-                    )
-                human_dists[level] = [float(value) for value in distribution]
+            annotation_labels = p.get("annotation_labels")
+            if not isinstance(annotation_labels, Mapping) or set(annotation_labels) != set(self.dimension_names):
+                raise ValueError(f"Line {line_number} in {path} must contain annotation_labels for every manifest dimension.")
+            votes = {}
+            for level in self.dimension_names:
+                values = annotation_labels[level]
+                if not isinstance(values, list) or not values or any(isinstance(value, bool) or not isinstance(value, int) or value < 0 or value >= len(self.level_labels[level]) for value in values):
+                    raise ValueError(f"Line {line_number} in {path} {level} annotation_labels must be non-empty valid label indices.")
+                votes[level] = list(values)
+            if len({len(values) for values in votes.values()}) != 1:
+                raise ValueError(f"Line {line_number} in {path} annotation_labels must have one aligned vote per dimension.")
+            human_dists = {level: [values.count(index) / len(values) for index in range(len(self.level_labels[level]))] for level, values in votes.items()}
             sample_id = str(p["id"])
             rows.append(
                 MultilevelSample(
@@ -90,9 +85,10 @@ class TextPairMultilevelJSONLReader(BaseReader):
                     text_b=str(p.get("text_b", "")),
                     hard_labels={
                         level: tied_argmax(human_dists[level], sample_id, f"{self.task}:{level}")
-                        for level in self.LEVEL_ORDER
+                        for level in self.dimension_names
                     },
                     human_dists=human_dists,
+                    annotation_labels=votes,
                 )
             )
         return rows

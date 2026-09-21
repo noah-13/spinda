@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import List, Literal, Optional, Sequence
 
 from hlv_toolkits.data.readers.base import BaseReader
+from hlv_toolkits.data.json_io import load_records, split_path
 from hlv_toolkits.data.tie_breaking import tied_argmax
 from hlv_toolkits.data.schemas import SingleTextClassificationSample, SingleTextDistributionSample, Split
 
@@ -31,7 +32,7 @@ class SingleTextClassificationJSONLReader(BaseReader):
                 raise FileNotFoundError(f"Dataset manifest not found: {manifest_path}") from exc
             if manifest.get("format") != SINGLE_TEXT_TASK:
                 raise ValueError(f"{manifest_path} must contain format={SINGLE_TEXT_TASK!r}.")
-            self.train_path, self.dev_path, self.test_path = self.data_dir / "train.jsonl", self.data_dir / "dev.jsonl", self.data_dir / "test.jsonl"
+            self.train_path, self.dev_path, self.test_path = split_path(self.data_dir, "train"), split_path(self.data_dir, "dev"), split_path(self.data_dir, "test")
             source_labels, source_mode, self.source = manifest.get("labels"), manifest.get("label_mode"), str(self.data_dir)
         else:
             if data_format != SINGLE_TEXT_TASK:
@@ -60,13 +61,7 @@ class SingleTextClassificationJSONLReader(BaseReader):
             raise FileNotFoundError(f"Dataset split not found: {path}")
         samples: List[SingleTextClassificationSample] = []
         seen: set[str] = set()
-        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            if not line.strip():
-                continue
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError as exc:
-                raise ValueError(f"Invalid JSON on line {line_number} in {path}: {exc}") from exc
+        for line_number, row in enumerate(load_records(path, kind="dataset records"), 1):
             identifier, text, votes = row.get("id"), row.get("text"), row.get("annotation_labels")
             if not isinstance(identifier, str) or not identifier or identifier in seen or not isinstance(text, str):
                 raise ValueError(f"Line {line_number} in {path} must contain a unique string id and string text.")

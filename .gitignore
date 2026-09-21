@@ -20,11 +20,35 @@ __pycache__/
 # Experiment outputs
 outputs/
 wandb/
+
+# Generated experiment analyses and result dashboards.
+analysis/
+analysis_disagreement/
+results/
+artifacts/
+notebooks/*_results.html
+notebooks/*_dashboard.ipynb
+
+# Local manuscript copies and editor backups.
+*_SPInda*.pdf
+*.orig
+
+# One-off analysis and recovery scripts; canonical launchers are documented in
+# docs/reproducing_paper.md.
+scripts/analyze_*.py
+scripts/plot_*.py
+scripts/*_parallel.sh
+scripts/predict_*.sh
+scripts/standard_predict_eval_parallel.sh
+scripts/discogem/*_parallel.sh
+scripts/discogem_multilevel_11parts/
+scripts/md_agreement_parts/
 # NFS temporary files
 .nfs*
 
 # Local reference material
 /machamp.pdf
+/_demo__SPInda (2).pdf
 
 # External local checkout; use a Git submodule if it needs to be shared.
 /externel/

@@ -22,13 +22,15 @@ export CUDA_VISIBLE_DEVICES="${GPU:-0}"
 evaluate_completed_runs() {
   local dataset_dir="$1" run_dir="$2"
   local model_config model_dir seed_dir test_dir predictions evaluation
-  local required_metrics='accuracy tvd jsd pojsd kl soft_micro_f1 soft_macro_f1 distance_correlation l2 ce'
+  # Match Evaluator's default categorical-distribution metrics. The legacy
+  # pojsd and soft-F1 metrics are opt-in and are not emitted by this command.
+  local required_metrics='accuracy tvd jsd kl ce l2 entropy_correlation distance_correlation'
 
   while IFS= read -r -d '' model_config; do
     model_dir="${model_config%/config.json}"
     seed_dir="${model_dir%/final_model}"
     test_dir="$seed_dir/test"
-    predictions="$test_dir/predictions.jsonl"
+    predictions="$test_dir/predictions.json"
     evaluation="$test_dir/evaluation.json"
 
     if [[ "$FORCE_EVAL" != "1" && -f "$evaluation" ]] && uv run python -c '

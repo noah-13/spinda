@@ -23,8 +23,10 @@ def test_prepare_multipico_preserves_official_splits_and_votes(tmp_path):
     }
     output = tmp_path / "processed"
     assert prepare_multipico(splits, output) == {"train": 1, "dev": 1, "test": 1}
+    train = json.loads((output / "train.json").read_text(encoding="utf-8"))[0]
     manifest = json.loads((output / "dataset.json").read_text(encoding="utf-8"))
-    train = json.loads((output / "train.jsonl").read_text(encoding="utf-8"))
+    train = json.loads((output / "train.json").read_text(encoding="utf-8"))[0]
+
     assert manifest["labels"] == LABELS
     assert "soft_label_metric_for_best_model" not in manifest
     assert train["id"] == "multipico:train:1"

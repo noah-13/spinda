@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from hlv_toolkits.scripts.download_data import download_md_agreement
+from hlv_toolkits.data.json_io import write_records
 
 
 def _annotation_votes(row: dict[str, Any], source: Path, item_id: str) -> list[int]:
@@ -30,9 +31,9 @@ def prepare_md_agreement(input_dir: Path, output_dir: Path) -> dict[str, int]:
         "labels": ["not_offensive", "offensive"],
         # Keep this manifest directly consumable by ``train --config``, just
         # like the text-pair exporters. Dataset provenance belongs in the
-        # JSONL record metadata rather than the training configuration.
-        "train_path": str(output_dir / "train.jsonl"),
-        "dev_path": str(output_dir / "dev.jsonl"),
+        # JSON record metadata rather than the training configuration.
+        "train_path": str(output_dir / "train.json"),
+        "dev_path": str(output_dir / "dev.json"),
     }
     (output_dir / "dataset.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     counts: dict[str, int] = {}
@@ -57,16 +58,14 @@ def prepare_md_agreement(input_dir: Path, output_dir: Path) -> dict[str, int]:
                 "meta": {"domain": (row.get("other_info") or {}).get("domain"), "source_id": str(item_id)},
             }
             records.append(record)
-        with (output_dir / f"{split}.jsonl").open("w", encoding="utf-8") as handle:
-            for record in records:
-                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        write_records(output_dir / f"{split}.json", records)
         counts[split] = len(records)
-        print(f"Wrote {len(records)} MD-Agreement samples -> {output_dir / f'{split}.jsonl'}")
+        print(f"Wrote {len(records)} MD-Agreement samples -> {output_dir / f'{split}.json'}")
     return counts
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Prepare MD-Agreement annotation-vote JSONL files")
+    parser = argparse.ArgumentParser(description="Prepare MD-Agreement annotation-vote JSON files")
     parser.add_argument("--input-dir", type=Path, default=Path("data/external/md_agreement"))
     parser.add_argument("--output-dir", type=Path, default=Path("data/processed/single_text/md_agreement"))
     args = parser.parse_args()

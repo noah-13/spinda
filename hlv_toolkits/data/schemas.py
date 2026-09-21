@@ -83,18 +83,20 @@ class SingleTextMultilabelDistributionSample(BaseSample):
     annotation_label_sets: List[List[int]] = field(default_factory=list)
 @dataclass
 class MultilevelSample(BaseSample):
-    """A text pair with one categorical distribution per manifest level."""
+    """A text pair with one categorical distribution per annotation dimension."""
     text_a: str = ""
     text_b: str = ""
     hard_labels: Dict[str, int] = field(default_factory=dict)
     human_dists: Dict[str, List[float]] = field(default_factory=dict)
+    annotation_labels: Dict[str, List[int]] = field(default_factory=dict)
 
 @dataclass
 class SingleTextMultilevelSample(BaseSample):
-    """One text with one categorical distribution per manifest level."""
+    """One text with one categorical distribution per annotation dimension."""
     text: str = ""
     hard_labels: Dict[str, int] = field(default_factory=dict)
     human_dists: Dict[str, List[float]] = field(default_factory=dict)
+    annotation_labels: Dict[str, List[int]] = field(default_factory=dict)
 
 
 AnySample = Union[

@@ -10,7 +10,7 @@ def test_single_text_multilevel_reader_uses_text_field_and_manifest(tmp_path):
         "level3": ["f", "g"],
     }
     (tmp_path / "dataset.json").write_text(
-        json.dumps({"format": "single_text_multilevel_label_distribution", "level_labels": labels}),
+        json.dumps({"format": "single_text_multidimensional_label_distribution", "level_labels": labels}),
         encoding="utf-8",
     )
     (tmp_path / "train.jsonl").write_text(
@@ -18,10 +18,10 @@ def test_single_text_multilevel_reader_uses_text_field_and_manifest(tmp_path):
             {
                 "id": "sample-1",
                 "text": "One input only.",
-                "human_dists": {
-                    "level1": [0.2, 0.8],
-                    "level2": [0.1, 0.7, 0.2],
-                    "level3": [1.0, 0.0],
+                "annotation_labels": {
+                    "level1": [0, 1],
+                    "level2": [1, 1],
+                    "level3": [0, 0],
                 },
             }
         )
@@ -39,11 +39,11 @@ def test_single_text_multilevel_reader_uses_text_field_and_manifest(tmp_path):
 
 def test_single_text_multilevel_reader_requires_text(tmp_path):
     (tmp_path / "dataset.json").write_text(
-        json.dumps({"format": "single_text_multilevel_label_distribution", "level_labels": {"level1": ["a", "b"], "level2": ["c", "d"], "level3": ["e", "f"]}}),
+        json.dumps({"format": "single_text_multidimensional_label_distribution", "level_labels": {"level1": ["a", "b"], "level2": ["c", "d"], "level3": ["e", "f"]}}),
         encoding="utf-8",
     )
     (tmp_path / "train.jsonl").write_text(
-        json.dumps({"id": "sample-1", "human_dists": {"level1": [1.0, 0.0], "level2": [1.0, 0.0], "level3": [1.0, 0.0]}}) + "\n",
+        json.dumps({"id": "sample-1", "annotation_labels": {"level1": [0, 0], "level2": [0, 0], "level3": [0, 0]}}) + "\n",
         encoding="utf-8",
     )
 
