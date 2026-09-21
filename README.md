@@ -1,8 +1,8 @@
-# SPINDA
+# SPInDa
 
 > Simple Prediction and Interpretation of Data with Human Label Variation
 
-SPINDA is a toolkit for training, evaluating, and interpreting NLP models when
+SPInDa is a toolkit for training, evaluating, and interpreting NLP models when
 multiple humans label the same example. It works with hard labels, empirical
 label distributions, multi-label tasks, and multi-dimensional annotations.
 
