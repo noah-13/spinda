@@ -24,9 +24,8 @@ Run commands from the repository root:
 
 ## Start with ChaosNLI
 
-ChaosNLI is a three-way NLI task with many annotations per example. SPINDA
-keeps the original votes rather than reducing them to one label. Its prepared
-layout is:
+[ChaosNLI](https://aclanthology.org/2020.emnlp-main.734/) is a three-way NLI task with many annotations per example. SPINDA keeps the original votes
+rather than reducing them to one label. Its prepared layout is:
 
 ```text
 data/datasets/text_pair/chaosnli/mnli_m/0/

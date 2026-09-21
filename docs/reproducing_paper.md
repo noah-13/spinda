@@ -19,14 +19,14 @@ require accepting its terms; raw and processed datasets are Git-ignored.
 
 ## Canonical launchers
 
-| Paper setting | Launcher |
-| --- | --- |
-| ChaosNLI (SNLI and MNLI-M) | `bash scripts/chaosnli.sh` |
-| MD-Agreement | `bash scripts/md_agreement.sh` |
-| MultiPICo (English / multilingual) | `bash scripts/multipico/english.sh` / `bash scripts/multipico/multilingual.sh` |
-| DiscoGeM 2.0 (English / multilingual / joint) | `bash scripts/discogem/english.sh` / `multilingual.sh` / `multilevel.sh` |
-| TGeGUM / Humans-and-Domains | `bash scripts/humans_and_domains.sh` |
-| MFRC multi-label | `bash scripts/mfrc.sh` |
+| Paper setting | Launcher | Dataset source |
+| --- | --- | --- |
+| ChaosNLI (SNLI and MNLI-M) | `bash scripts/chaosnli.sh` | [Nie, Zhou, and Bansal (2020)](https://aclanthology.org/2020.emnlp-main.734/) |
+| MD-Agreement | `bash scripts/md_agreement.sh` | [LeWiDi 2023](https://aclanthology.org/2023.semeval-1.314/) |
+| MultiPICo (English / multilingual) | `bash scripts/multipico/english.sh` / `bash scripts/multipico/multilingual.sh` | [LeWiDi 2025 data page](https://le-wi-di.github.io/) |
+| DiscoGeM 2.0 (English / multilingual / joint) | `bash scripts/discogem/english.sh` / `multilingual.sh` / `multilevel.sh` | [Yung et al. (2024)](https://aclanthology.org/2024.lrec-main.443/) |
+| TGeGUM / Humans-and-Domains | `bash scripts/humans_and_domains.sh` | [van der Goot et al. (2024)](https://aclanthology.org/2024.lrec-main.245/) |
+| MFRC multi-label | `bash scripts/mfrc.sh` | [Trager et al. (2022)](https://arxiv.org/abs/2208.05545) |
 
 Use `LEVEL=level1` (or `level2`, `level3`) to restrict a DiscoGeM run.
 The launcher defaults retain the paper's English-only versus multilingual model pools.

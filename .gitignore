@@ -31,9 +31,12 @@ artifacts/
 notebooks/*_results.html
 notebooks/*_dashboard.ipynb
 
-# Local manuscript copies and editor backups.
+# Local manuscript copies, release audits, and operational handoff notes.
 *_SPInda*.pdf
 *.orig
+docs/md_agreement_distributed_run.md
+docs/md_agreement_hf_upload.md
+docs/paper_consistency.md
 
 # One-off analysis and recovery scripts; canonical launchers are documented in
 # docs/reproducing_paper.md.
@@ -42,6 +45,8 @@ scripts/plot_*.py
 scripts/*_parallel.sh
 scripts/predict_*.sh
 scripts/standard_predict_eval_parallel.sh
+scripts/humans_and_multipico_all_runs.sh
+scripts/multipico.sh
 scripts/discogem/*_parallel.sh
 scripts/discogem_multilevel_11parts/
 scripts/md_agreement_parts/
