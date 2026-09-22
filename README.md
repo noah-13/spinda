@@ -1,11 +1,13 @@
-# spinda
+# SPInDa
 
 > Simple Prediction and Interpretation of Data with Human Label Variation
 
-spinda (Simple Prediction and Interpretation of Data with Human Label
-Variation) is a toolkit for training, evaluating, and interpreting NLP models when
-multiple humans label the same example. It works with hard labels, empirical
-label distributions, multi-label tasks, and multi-dimensional annotations.
+SPInDa (Simple Prediction and Interpretation of Data with Human Label
+Variation) is a toolkit centered on **human label variation (HLV)**: the
+variation that arises when multiple people label the same example. It trains,
+evaluates, and interprets NLP models while preserving that variation, supporting
+hard labels, empirical label distributions, multi-label tasks, and
+multi-dimensional annotations.
 
 ## Install
 
@@ -25,7 +27,7 @@ Run commands from the repository root:
 
 ## Start with ChaosNLI
 
-[ChaosNLI](https://aclanthology.org/2020.emnlp-main.734/) is a three-way NLI task with many annotations per example. spinda keeps the original votes
+[ChaosNLI](https://aclanthology.org/2020.emnlp-main.734/) is a three-way NLI task with many annotations per example. SPInDa keeps the original votes
 rather than reducing them to one label. Its prepared layout is:
 
 ```text
@@ -38,7 +40,7 @@ data/datasets/text_pair/chaosnli/mnli_m/0/
 
 ### Prepare the data
 
-Download the raw release and convert the MNLI-M fold into spinda's dataset
+Download the raw release and convert the MNLI-M fold into SPInDa's dataset
 format. The downloader tries the official ChaosNLI archive first and falls back
 to a public research mirror containing the same original JSONL files when the
 upstream Dropbox link is unavailable; use remains subject to ChaosNLI's original
@@ -82,7 +84,7 @@ for the required format and training workflow.
 
 ### Train with reusable JSON configuration and CLI overrides
 
-spinda does not assign fixed roles to configuration files. For example, you can
+SPInDa does not assign fixed roles to configuration files. For example, you can
 keep the stable data definition in `dataset.json`, share optimization defaults
 in `configs/training.json`, and add a model- or experiment-specific JSON file
 only when it is reusable. This lets the same dataset definition be reused
@@ -111,7 +113,7 @@ configuration precedence are in
 
 ## Evaluate and analyze a run
 
-### A spinda-trained model
+### A SPInDa-trained model
 
 For a checkpoint trained above, prediction and evaluation connect directly:
 `predict` writes the JSON file that `evaluate` accepts, with no conversion. See the [prediction options](docs/configuration_reference.md#prediction).
@@ -141,7 +143,7 @@ The [evaluation metrics guide](docs/evaluation_metrics.md) defines every metric,
 
 ### An external model
 
-The evaluation and analysis commands also work independently of spinda
+The evaluation and analysis commands also work independently of SPInDa
 training. Convert an external model's output to the [prediction JSON
 contract](docs/prediction_contract.md#prediction-json): a `.json` top-level
 array whose records have a matching `id`, a probability vector in the dataset's class order, and a zero-based predicted class:
@@ -156,7 +158,7 @@ For multilabel tasks, use the same outer record structure; `outputs.probs` and
 `outputs.pred` are same-length vectors in label order, with zero-or-one values
 in `pred`. See the [multilabel prediction JSON contract](docs/prediction_contract.md#multilabel-prediction-json).
 
-Then run the same evaluator without loading any spinda checkpoint:
+Then run the same evaluator without loading any SPInDa checkpoint:
 
 ```bash
 uv run spinda evaluate \
@@ -236,7 +238,7 @@ When both plot types are selected with the default `--metric tvd`, the outputs l
 - [Prediction JSON contract](docs/prediction_contract.md)
 - [Evaluation metrics](docs/evaluation_metrics.md)
 
-spinda supports text-pair and single-text classification, multi-label data, and
+SPInDa supports text-pair and single-text classification, multi-label data, and
 multi-dimensional annotations. The repository's canonical launchers for
 ChaosNLI, DiscoGeM, MD-Agreement, MultiPICo, TGeGUM/Humans-and-Domains, and
 MFRC are listed in the paper guide below.
@@ -249,4 +251,4 @@ scope. It is intentionally separate from the general workflow above.
 
 ## License
 
-spinda is released under the [MIT License](LICENSE).
+SPInDa is released under the [MIT License](LICENSE).
