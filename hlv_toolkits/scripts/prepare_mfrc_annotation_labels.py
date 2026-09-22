@@ -12,6 +12,8 @@ from hlv_toolkits.data.json_io import write_records
 
 MFRC_LABELS = ["Care", "Equality", "Proportionality", "Loyalty", "Authority", "Purity", "Thin Morality", "Non-Moral"]
 MFRC_LABEL_TO_ID = {label: index for index, label in enumerate(MFRC_LABELS)}
+MFRC_DATASET_ID = "USC-MOLA-Lab/MFRC"
+MFRC_DATASET_SPLIT = "train_dedup"
 
 
 def _label_set(value: Any) -> list[int]:
@@ -41,7 +43,17 @@ def prepare_mfrc(rows: Iterable[dict[str, Any]], output_dir: Path) -> dict[str, 
             raise ValueError("Every MFRC row requires non-empty text, subreddit, and bucket strings.")
         grouped.setdefault((text, subreddit, bucket), []).append(row)
     output_dir.mkdir(parents=True, exist_ok=True)
-    manifest = {"format": "single_text_multilabel_annotation_distribution", "labels": MFRC_LABELS, "train_path": str(output_dir / "train.json"), "dev_path": str(output_dir / "dev.json")}
+    manifest = {
+        "format": "single_text_multilabel_annotation_distribution",
+        "labels": MFRC_LABELS,
+        "train_path": str(output_dir / "train.json"),
+        "dev_path": str(output_dir / "dev.json"),
+        "source": {
+            "dataset": MFRC_DATASET_ID,
+            "split": MFRC_DATASET_SPLIT,
+            "aggregation": "one grouped item per (text, subreddit, bucket); source rows retain individual annotations",
+        },
+    }
     (output_dir / "dataset.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     records = {split: [] for split in ("train", "dev", "test")}
     for ordinal, ((text, subreddit, bucket), annotations) in enumerate(grouped.items()):
@@ -54,7 +66,7 @@ def prepare_mfrc(rows: Iterable[dict[str, Any]], output_dir: Path) -> dict[str, 
 
 def _download_rows() -> list[dict[str, Any]]:
     from datasets import load_dataset
-    return [dict(row) for row in load_dataset("USC-MOLA-Lab/MFRC", split="train_dedup")]
+    return [dict(row) for row in load_dataset(MFRC_DATASET_ID, split=MFRC_DATASET_SPLIT)]
 
 
 def main() -> None:

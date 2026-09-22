@@ -4,12 +4,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/interrupt_cleanup.sh"
+source "$SCRIPT_DIR/lib/paper_experiment_defaults.sh"
 cd "$SCRIPT_DIR/.."
 
 INPUT_DIR="${MD_AGREEMENT_DIR:-data/raw/md_agreement}"
 DATA_DIR="${MD_AGREEMENT_OUTPUT_DIR:-data/datasets/single_text/md_agreement}"
 OUT_ROOT="${OUT_ROOT:-outputs/md_agreement}"
-TRAINING_CONFIG="${TRAINING_CONFIG:-configs/training.json}"
+TRAINING_CONFIG="${TRAINING_CONFIG:-$PAPER_TRAINING_CONFIG}"
+MODEL_SPECS="${MODEL_SPECS:-$PAPER_ENGLISH_MODEL_SPECS}"
 SWEEP_SCRIPT="${SWEEP_SCRIPT:-scripts/run_single_text_sweep.sh}"
 RUN_NAME="${RUN_NAME:-default}"
 FORCE_PREPARE="${FORCE_PREPARE:-0}"
@@ -24,5 +26,5 @@ fi
 
 DATASET_CONFIG="$DATA_DIR/dataset.json" RUN_NAME="$RUN_NAME" OUT_ROOT="$OUT_ROOT" \
   TRAINING_CONFIG="$TRAINING_CONFIG" GPU="${GPU:-0}" FORCE="${FORCE:-0}" \
-  MODEL_SPECS="${MODEL_SPECS:-}" RUN_SPECS="${RUN_SPECS:-}" SEEDS_OVERRIDE="${SEEDS_OVERRIDE:-}" \
+  MODEL_SPECS="$MODEL_SPECS" RUN_SPECS="${RUN_SPECS:-}" SEEDS_OVERRIDE="${SEEDS_OVERRIDE:-}" \
   bash "$SWEEP_SCRIPT"

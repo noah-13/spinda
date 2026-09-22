@@ -12,10 +12,17 @@ MODEL_SPECS=roberta-base RUN_SPECS='soft ce' SEEDS_OVERRIDE=42 GPU=0 \
   bash scripts/chaosnli.sh
 ```
 
-The paper configuration defaults, including seeds 42, 43, and 44, are in
-[`configs/training.json`](../configs/training.json). Launchers accept `GPU`,
-`FORCE=1`, and `SEEDS_OVERRIDE="42 43 44"`. Upstream dataset download may
-require accepting its terms; raw and processed datasets are Git-ignored.
+Every canonical launcher uses the shared
+[`configs/training.json`](../configs/training.json) by default, including its
+seeds 42, 43, and 44. They also use one consistent model pool per language
+scope: English uses the four English models (DeBERTa-v3-large, RoBERTa-base,
+BERT-base-uncased, and Twhin-BERT-base) plus the three multilingual models
+(XLM-RoBERTa-base, mBERT, and InfoXLM-base); multilingual uses those three
+multilingual models only.
+Launchers accept `GPU`, `FORCE=1`, `SEEDS_OVERRIDE="42 43 44"`,
+`TRAINING_CONFIG`, and `MODEL_SPECS` for explicit ablations. Upstream dataset
+download may require accepting its terms; raw and processed datasets are
+Git-ignored.
 
 ## Canonical launchers
 
@@ -27,6 +34,21 @@ require accepting its terms; raw and processed datasets are Git-ignored.
 | DiscoGeM 2.0 (English / multilingual / joint) | `bash scripts/discogem/english.sh` / `multilingual.sh` / `multilevel.sh` | [Yung et al. (2024)](https://aclanthology.org/2024.lrec-main.443/) |
 | TGeGUM / Humans-and-Domains | `bash scripts/humans_and_domains.sh` | [Barrett et al. (2024)](https://aclanthology.org/2024.lrec-main.245/) |
 | MFRC multi-label | `bash scripts/mfrc.sh` | [Trager et al. (2026)](https://aclanthology.org/2026.lrec-1.507/) |
+
+### MFRC version and annotation counts
+
+The MFRC launcher uses the public Hugging Face
+[`USC-MOLA-Lab/MFRC`](https://huggingface.co/datasets/USC-MOLA-Lab/MFRC)
+`train_dedup` release, then groups its one-row-per-annotation records by
+`(text, subreddit, bucket)`. This processed source contains 53,827 annotation
+rows and yields **17,886** grouped comments. Its observed annotation-count
+distribution is 135 comments with 2 rows, 17,451 with 3, 296 with 4, and 4
+with 5. Thus, `N = 17,886` and `Ann./item = 2–5` refer specifically to this
+processed Hugging Face version, not to the original MFRC-paper corpus.
+
+The original MFRC paper reports 16,123 English Reddit comments, each annotated
+by at least three annotators. Treat those as the source-paper statistics; do
+not substitute the processed-release counts when describing the original corpus.
 
 Use `LEVEL=level1` (or `level2`, `level3`) to restrict a DiscoGeM run.
 The launcher defaults retain the paper's English-only versus multilingual model pools.

@@ -15,6 +15,8 @@ def test_prepare_mfrc_groups_annotators_and_reader_preserves_votes(tmp_path):
     assert sum(counts.values()) == 1
     manifest = json.loads((output / "dataset.json").read_text(encoding="utf-8"))
     assert manifest["format"] == "single_text_multilabel_annotation_distribution"
+    assert manifest["source"]["dataset"] == "USC-MOLA-Lab/MFRC"
+    assert manifest["source"]["split"] == "train_dedup"
     split = next(split for split, count in counts.items() if count)
     sample = SingleTextMultilabelJSONReader(str(output)).load_split(split)[0]
     assert sample.annotation_label_sets == [[0, 1], [0], [7]]

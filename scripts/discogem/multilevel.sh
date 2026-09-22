@@ -4,9 +4,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/interrupt_cleanup.sh"
+source "$SCRIPT_DIR/../lib/paper_experiment_defaults.sh"
 cd "$SCRIPT_DIR/../.."
 
-TRAINING_CONFIG="${TRAINING_CONFIG:-configs/training.json}"
+TRAINING_CONFIG="${TRAINING_CONFIG:-$PAPER_TRAINING_CONFIG}"
 SWEEP_SCRIPT="${SWEEP_SCRIPT:-scripts/run_text_pair_sweep.sh}"
 OUT_ROOT="${OUT_ROOT:-outputs/discogem/multilevel}"
 # Space-separated subset: english, multilingual, or both (the default).
@@ -17,11 +18,11 @@ for variant in $VARIANTS; do
   case "$variant" in
     english)
       dataset_config="data/datasets/text_pair/discogem/english/multilevel/dataset.json"
-      default_models="microsoft/deberta-v3-large;roberta-base;bert-base-uncased;xlm-roberta-base;Twitter/twhin-bert-base;bert-base-multilingual-cased"
+      default_models="$PAPER_ENGLISH_MODEL_SPECS"
       ;;
     multilingual)
       dataset_config="data/datasets/text_pair/discogem/multilingual/multilevel/dataset.json"
-      default_models="xlm-roberta-base;bert-base-multilingual-cased;microsoft/infoxlm-base"
+      default_models="$PAPER_MULTILINGUAL_MODEL_SPECS"
       ;;
     *)
       echo "Unknown VARIANTS value: $variant (expected english and/or multilingual)" >&2

@@ -24,7 +24,26 @@ All examples below call the real implementations in `hlv_toolkits.eval.metrics`.
 
 Note: for `jsd`, tiny floating-point error can appear (e.g., `2e-9` instead of exact `0`).
 
-## 2. Controlled Toy Data
+## 2. Mathematical Relationships
+
+For a normalized categorical human distribution `q` and model distribution `p`:
+
+- `TVD(q, p) = 1/2 ||q - p||_1`. In this setting it is also DistCE, and
+  `L1(q, p) = 2 * TVD(q, p)`.
+- Categorical soft accuracy is exactly `1 - TVD(q, p)`. Reporting it alongside
+  TVD gives the same ranking with the direction reversed.
+- `cross_entropy(q, p) = H(q) + KL(q || p)`. For a fixed evaluation set,
+  cross-entropy and KL differ only by the human-label entropy term.
+- With base-2 logarithms, `PO-JSD(q, p) = 1 - JSD(q, p)`. JSD is a divergence;
+  Jensen-Shannon distance is `sqrt(JSD)`.
+
+These are mathematical relationships, not empirical findings. They explain why
+equivalent transforms should not be co-primary metrics. Observed correlations
+between distinct metrics are dataset-dependent; see the
+[evaluation metric guide](evaluation_metrics.md#correlation-evidence) for the
+paper's correlation analysis and its reporting implications.
+
+## 3. Controlled Toy Data
 
 We use one human matrix and 5 prediction variants:
 - `identical`: exactly equal to human.
@@ -95,7 +114,7 @@ for name, pred in cases.items():
     print("distance_correlation", compute_distance_correlation(pred, human))
 ```
 
-## 3. Example Output (From This Repo)
+## 4. Example Output (From This Repo)
 
 | Case | `tvd` | `jsd` | `kl` | `l2` | `soft_micro_f1` | `distance_correlation` |
 |---|---:|---:|---:|---:|---:|---:|
@@ -111,7 +130,7 @@ How to read this quickly:
 - `confident_wrong` and `row_permuted` are much worse on pointwise metrics.
 - `uniform` is mediocre on pointwise metrics, but has `distance_correlation ~= 0`.
 
-## 4. Exact Extremes (Single Sample)
+## 5. Exact Extremes (Single Sample)
 
 Use one-hot opposite predictions to see maxima clearly:
 
@@ -137,7 +156,7 @@ print("l2", compute_euclidean_distance(pred, human)[0])      # sqrt(2) (max on 3
 print("soft_micro_f1", compute_soft_micro_f1(pred, human))   # 0.0 (min)
 ```
 
-## 5. “Large vs Small” Interpretation Rules
+## 6. “Large vs Small” Interpretation Rules
 
 - `tvd/jsd/l2`:
   - `0` means exact match.
@@ -152,13 +171,24 @@ print("soft_micro_f1", compute_soft_micro_f1(pred, human))   # 0.0 (min)
   - Measures global geometry agreement, not row-by-row closeness.
   - Can stay high even when per-sample errors are large, if structural dependency is preserved.
 
-## 6. Practical Recommendation
+## 7. Practical Recommendation
 
-For HLV evaluation, report a small complementary set instead of one metric:
-- Pointwise mismatch: `tvd` or `jsd`
-- Asymmetric harshness: `kl`
-- Overlap view: `soft_micro_f1` and/or `soft_macro_f1`
-- Global structure: `distance_correlation`
+For paper-aligned reporting, choose a compact set based on the annotation
+structure rather than reporting every available score:
 
-If you want the visual version of this tutorial, see:
-- `notebooks/metrics_tutorial.ipynb`
+- Categorical HLV: report mean `tvd` as the representative distributional
+  discrepancy, with `kl` and `entropy_correlation` as complementary metrics.
+  Add `--analysis` when disagreement-stratified and instance-level errors are
+  relevant.
+- Multi-label HLV: report conventional macro-F1 together with soft macro-F1,
+  multilabel PO-JSD, and multilabel entropy correlation. Soft micro-F1 remains
+  available for development selection, but it is strongly correlated with soft
+  macro-F1 in the paper analyses.
+
+`jsd`, `l2`, `cross_entropy`, and `distance_correlation` remain useful for
+targeted analyses or comparison with prior work, but they are not part of the
+paper's compact primary reporting sets.
+
+For the empirical correlation figures and the complete metric-selection
+rationale, see the [evaluation metric guide](evaluation_metrics.md). For the
+visual version of the toy examples, see `notebooks/metrics_tutorial.ipynb`.

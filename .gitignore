@@ -55,7 +55,8 @@ scripts/md_agreement_parts/
 
 # Local reference material
 /machamp.pdf
-/_demo__SPInda (2).pdf
+/demo.pdf
+/*.pdf
 
 # External local checkout; use a Git submodule if it needs to be shared.
 /externel/

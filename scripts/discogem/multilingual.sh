@@ -3,13 +3,14 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/interrupt_cleanup.sh"
+source "$SCRIPT_DIR/../lib/paper_experiment_defaults.sh"
 cd "$SCRIPT_DIR/../.."
 
 OUT_ROOT="${OUT_ROOT:-outputs/discogem/multilingual}"
-TRAINING_CONFIG="${TRAINING_CONFIG:-configs/training.json}"
+TRAINING_CONFIG="${TRAINING_CONFIG:-$PAPER_TRAINING_CONFIG}"
 SWEEP_SCRIPT="${SWEEP_SCRIPT:-scripts/run_text_pair_sweep.sh}"
 # These are the multilingual encoders from the repository's DiscoGeM screen.
-MODEL_SPECS="${MODEL_SPECS:-xlm-roberta-base;bert-base-multilingual-cased;microsoft/infoxlm-base}"
+MODEL_SPECS="${MODEL_SPECS:-$PAPER_MULTILINGUAL_MODEL_SPECS}"
 if [[ -n "${LEVEL:-}" ]]; then LEVELS=("$LEVEL"); else LEVELS=(level1 level2 level3); fi
 
 for level in "${LEVELS[@]}"; do

@@ -3,12 +3,14 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/interrupt_cleanup.sh"
+source "$SCRIPT_DIR/lib/paper_experiment_defaults.sh"
 cd "$SCRIPT_DIR/.."
 
 DATA_DIR="${DATA_DIR:-data/datasets/text_pair/chaosnli}"
 INPUT_DIR="${INPUT_DIR:-data/raw/chaosnli}"
 OUT_ROOT="${OUT_ROOT:-outputs/chaosnli}"
-TRAINING_CONFIG="${TRAINING_CONFIG:-configs/training.json}"
+TRAINING_CONFIG="${TRAINING_CONFIG:-$PAPER_TRAINING_CONFIG}"
+MODEL_SPECS="${MODEL_SPECS:-$PAPER_ENGLISH_MODEL_SPECS}"
 SWEEP_SCRIPT="${SWEEP_SCRIPT:-scripts/run_text_pair_sweep.sh}"
 FOLD="${FOLD:-0}"
 FORCE_PREPARE="${FORCE_PREPARE:-0}"
@@ -67,7 +69,7 @@ for subset in $SUBSETS; do
   if [[ "$FORCE_PREPARE" == "1" || ! -s "$dataset_config" || ! -s "$dataset_dir/train.json" || ! -s "$dataset_dir/dev.json" || ! -s "$dataset_dir/test.json" ]]; then
     uv run python -m hlv_toolkits.scripts.prepare_chaosnli_annotation_labels --input_dir "$INPUT_DIR" --output_dir "$DATA_DIR" --subsets "$subset" --fold "$FOLD"
   fi
-  DATASET_CONFIG="$dataset_config" RUN_NAME="$subset/fold_$FOLD" OUT_ROOT="$OUT_ROOT" TRAINING_CONFIG="$TRAINING_CONFIG" SEEDS_OVERRIDE="${SEEDS_OVERRIDE:-}" GPU="${GPU:-0}" FORCE="${FORCE:-0}" \
+  DATASET_CONFIG="$dataset_config" RUN_NAME="$subset/fold_$FOLD" OUT_ROOT="$OUT_ROOT" TRAINING_CONFIG="$TRAINING_CONFIG" MODEL_SPECS="$MODEL_SPECS" SEEDS_OVERRIDE="${SEEDS_OVERRIDE:-}" GPU="${GPU:-0}" FORCE="${FORCE:-0}" \
     bash "$SWEEP_SCRIPT"
   if [[ "$EVALUATE" == "1" ]]; then
     evaluate_completed_runs "$dataset_dir" "$OUT_ROOT/$subset/fold_$FOLD"

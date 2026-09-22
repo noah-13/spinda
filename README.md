@@ -1,8 +1,9 @@
-# SPInDa
+# spinda
 
 > Simple Prediction and Interpretation of Data with Human Label Variation
 
-SPInDa is a toolkit for training, evaluating, and interpreting NLP models when
+spinda (Simple Prediction and Interpretation of Data with Human Label
+Variation) is a toolkit for training, evaluating, and interpreting NLP models when
 multiple humans label the same example. It works with hard labels, empirical
 label distributions, multi-label tasks, and multi-dimensional annotations.
 
@@ -24,7 +25,7 @@ Run commands from the repository root:
 
 ## Start with ChaosNLI
 
-[ChaosNLI](https://aclanthology.org/2020.emnlp-main.734/) is a three-way NLI task with many annotations per example. SPInDa keeps the original votes
+[ChaosNLI](https://aclanthology.org/2020.emnlp-main.734/) is a three-way NLI task with many annotations per example. spinda keeps the original votes
 rather than reducing them to one label. Its prepared layout is:
 
 ```text
@@ -37,7 +38,7 @@ data/datasets/text_pair/chaosnli/mnli_m/0/
 
 ### Prepare the data
 
-Download the raw release and convert the MNLI-M fold into SPInDa's dataset
+Download the raw release and convert the MNLI-M fold into spinda's dataset
 format. The downloader tries the official ChaosNLI archive first and falls back
 to a public research mirror containing the same original JSONL files when the
 upstream Dropbox link is unavailable; use remains subject to ChaosNLI's original
@@ -81,7 +82,7 @@ for the required format and training workflow.
 
 ### Train with reusable JSON configuration and CLI overrides
 
-SPInDa does not assign fixed roles to configuration files. For example, you can
+spinda does not assign fixed roles to configuration files. For example, you can
 keep the stable data definition in `dataset.json`, share optimization defaults
 in `configs/training.json`, and add a model- or experiment-specific JSON file
 only when it is reusable. This lets the same dataset definition be reused
@@ -110,7 +111,7 @@ configuration precedence are in
 
 ## Evaluate and analyze a run
 
-### A SPInDa-trained model
+### A spinda-trained model
 
 For a checkpoint trained above, prediction and evaluation connect directly:
 `predict` writes the JSON file that `evaluate` accepts, with no conversion.
@@ -131,7 +132,7 @@ uv run spinda evaluate \
 
 ### An external model
 
-The evaluation and analysis commands also work independently of SPInDa
+The evaluation and analysis commands also work independently of spinda
 training. Convert an external model's output into a `.json` top-level array;
 each record needs a matching `id`, probability vector in the dataset's class
 order, and its zero-based predicted class:
@@ -142,7 +143,7 @@ order, and its zero-based predicted class:
 ]
 ```
 
-Then run the same evaluator without loading any SPInDa checkpoint:
+Then run the same evaluator without loading any spinda checkpoint:
 
 ```bash
 uv run spinda evaluate \
@@ -158,7 +159,7 @@ and multi-dimensional outputs, is in
 
 `evaluate --analysis` writes aggregate metrics, a disagreement-stratified
 report, and a per-instance error table. To compare strategies across several
-seeds, pass one run directory per strategy. SPInDa discovers the matching
+seeds, pass one run directory per strategy. spinda discovers the matching
 analysis artifacts beneath each `seed_*/test/` directory.
 
 ```bash
@@ -181,14 +182,33 @@ and an interactive HTML diagnostic with per-instance hover details. It is
 optional: use `--no-plot` to skip it, or `--no-ternary-browser` to write only
 the PNG.
 
+## Choose evaluation metrics
+
+Match the metric to the target your task actually provides:
+
+| Target | Primary metric | Useful complement |
+| --- | --- | --- |
+| One hard label per example | Accuracy or macro-F1 | Per-class F1 for imbalance |
+| Categorical human label distribution | TVD | KL and entropy correlation |
+| Independent multi-label probabilities | Macro-F1 | Soft macro-F1, multilabel PO-JSD, and entropy correlation |
+| Multi-dimensional labels | Report the primary metric per level | Unweighted mean across levels |
+
+Follow the paper's compact reporting sets: TVD with KL and entropy correlation
+for categorical HLV, and macro-F1 with soft macro-F1, PO-JSD, and entropy
+correlation for multi-label HLV. Do not report TVD and JSD as co-primary
+results: they are nearly redundant in the included categorical experiments. The
+[evaluation metric guide](docs/evaluation_metrics.md) explains the choices and
+shows the correlation evidence.
+
 ## Learn more
 
 - [Data layout and public dataset format](data/README.md)
 - [Configuration reference](docs/configuration_reference.md)
 - [Prediction JSON contract](docs/prediction_contract.md)
+- [How to choose evaluation metrics](docs/evaluation_metrics.md)
 - [HLV metric tutorial](docs/hlv_metrics_tutorial.md)
 
-SPInDa supports text-pair and single-text classification, multi-label data, and
+spinda supports text-pair and single-text classification, multi-label data, and
 multi-dimensional annotations. The repository's canonical launchers for
 ChaosNLI, DiscoGeM, MD-Agreement, MultiPICo, TGeGUM/Humans-and-Domains, and
 MFRC are listed in the paper guide below.
@@ -201,4 +221,4 @@ scope. It is intentionally separate from the general workflow above.
 
 ## License
 
-SPInDa is released under the [MIT License](LICENSE).
+spinda is released under the [MIT License](LICENSE).

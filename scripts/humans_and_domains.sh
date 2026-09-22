@@ -4,15 +4,16 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/interrupt_cleanup.sh"
+source "$SCRIPT_DIR/lib/paper_experiment_defaults.sh"
 cd "$SCRIPT_DIR/.."
 
 INPUT_DIR="${HUMANS_AND_DOMAINS_INPUT_DIR:-data/raw/humans_and_domains}"
 SINGLE_TEXT_ROOT="${HUMANS_AND_DOMAINS_SINGLE_TEXT_OUTPUT_ROOT:-data/datasets/single_text}"
 OUT_ROOT="${OUT_ROOT:-outputs/humans_and_domains}"
-TRAINING_CONFIG="${TRAINING_CONFIG:-configs/training.json}"
+TRAINING_CONFIG="${TRAINING_CONFIG:-$PAPER_TRAINING_CONFIG}"
 SINGLE_SWEEP="${SINGLE_SWEEP:-scripts/run_single_text_sweep.sh}"
 TASKS="${TASKS:-genre topic1 topic2}"
-MODEL_SPECS="${MODEL_SPECS:-microsoft/deberta-v3-large;roberta-base;bert-base-uncased;Twitter/twhin-bert-base}"
+MODEL_SPECS="${MODEL_SPECS:-$PAPER_ENGLISH_MODEL_SPECS}"
 RUN_SPECS="${RUN_SPECS:-soft ce;soft mse;soft jsd;soft rel;soft_to_hard ce}"
 
 dataset_config="$SINGLE_TEXT_ROOT/humans_and_domains/genre/dataset.json"
