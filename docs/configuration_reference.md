@@ -1,7 +1,7 @@
 # Configuration reference
 
 This page lists every user-facing option exposed by the training, prediction,
-and evaluation commands. Training settings may be supplied as command-line
+evaluation, and analysis commands. Training settings may be supplied as command-line
 arguments or in JSON files passed through `--config`. The training target type
 is determined only by `label_mode`; there is no separate soft-label switch.
 
@@ -26,12 +26,24 @@ do not supply both names for either setting.
 | `labels` / `--labels` | Ordered list of strings | `null` | Label names for categorical and multi-label data. |
 | `level_labels` / `--level_labels` | JSON object `{dimension: [label, ...]}` | `null` | Optional multidimensional label mapping; must match the manifest exactly. |
 | `label_mode` / `--label_mode` | `hard`, `soft`, `soft_to_hard` | `null` | Hard targets, aggregated soft targets, or majority-vote targets with retained soft evaluation. |
-| `data_source` / `--data_source` | `text_pair`, `single_text`, `single_text_multilabel`, `multilevel` | `text_pair` | Internal route; `format` determines the effective value, so normally leave this unset. |
 
 For dataset directories, `dataset.json` supplies `format`, plus `labels` or
 `level_labels` and optionally `label_mode`. Multidimensional rows use raw,
 aligned `annotation_labels` per dimension; distributions are derived by the
 reader.
+
+## Separate versus joint (multilevel) training
+
+`format` is the sole selector for the input reader and model-head family.
+Separate training uses `text_pair_label_distribution` (or
+`single_text_label_distribution`): create one dataset manifest and independent
+run per level. DiscoGeM's `english.sh` and `multilingual.sh` loop over all
+levels; `LEVEL=level2` selects one.
+
+Joint training uses `text_pair_multidimensional_label_distribution` (or its
+single-text equivalent): one shared encoder feeds an independent softmax head
+per dimension, and the per-dimension losses are summed. It does not create a
+flat combined label space or enforce hierarchy constraints at decoding time.
 
 ## Model and training objectives
 
@@ -61,49 +73,67 @@ also supports only `ce`.
 
 ## Prediction
 
-Prediction is CLI-only; it does not read a JSON configuration file.
+`predict` loads a repository-trained checkpoint and writes predictions for an
+arbitrary JSON input file. The input contract and output JSON forms are in the
+[prediction contract](prediction_contract.md).
 
-| CLI option | Accepted values | Default | Description |
+| Option | Accepted values | Default | Description |
 |---|---|---|---|
-| `--model_path` | Model/checkpoint directory | Required | Fine-tuned model to load. |
-| `--data_dir` | Processed dataset directory | Required | Directory containing `dataset.json` and the requested split. |
-| `--split` | `train`, `dev`, `test` | `test` | Split to predict. |
+| `--model_path` | Model/checkpoint directory | Required | Checkpoint to load. |
+| `--input_file` | JSON array path | Required | Text rows to predict. |
 | `--output_file` | JSON path | `predictions.json` | Prediction-output path. |
 | `--batch_size` | Integer | `32` | Inference batch size. |
 | `--device` | `auto`, `cpu`, `cuda`, `cuda:<index>` | CUDA if available, otherwise CPU | Inference device. |
-| `--max_length` | Integer | `0` | Tokenized maximum length; `0` uses the model/tokenizer limit. |
+| `--max_length` | Integer | `0` | Tokenized maximum length; `0` uses the model limit. |
+| `--config` | One or more JSON paths | Optional | Merged prediction-run settings; CLI values override them. |
 
-See [prediction_contract.md](prediction_contract.md) for output JSON schemas.
+For repeated inference, a config is useful for stable settings such as
+`model_path`, `device`, and `batch_size`. Keep the per-run input and output
+paths on the command line.
 
-## Evaluation and analysis
+## Evaluation
 
-| CLI option | Accepted values | Default | Description |
+`evaluate` compares predictions with annotated human-label rows. It requires
+matching `--predictions`, `--input_file`, and `--human_labels` files; the input
+and human-label file may be the same. The evaluator infers categorical,
+multilabel, or multidimensional output from `outputs`. See the
+[prediction contract](prediction_contract.md#evaluate-predictions) for file
+shapes and the [metric guide](evaluation_metrics.md) for metric selection.
+
+| Option | Accepted values | Default | Description |
 |---|---|---|---|
-| `--predictions` | Prediction JSON path | Required | Predictions to evaluate. |
-| `--predictions_format` | `json` | `json` | Prediction format; JSON is the only implemented format. |
-| `--data_dir` | Processed dataset directory | One of this or `--ground_truth` is required | Loads ground truth and manifest-defined label order. |
-| `--ground_truth` | External JSON path | One of this or `--data_dir` is required | Lightweight external ground-truth source. |
-| `--ground_truth_split` | `train`, `dev`, `test` | `test` | Split to load from `--data_dir`. |
-| `--output_file` | JSON path or `null` | Auto-generated | Evaluation-results path. |
-| `--plot` / `--no-plot` | Boolean | `true` | Enable or disable optional ternary diagnostics for three-class soft-label data. |
-| `--plot_dir` | Path or `null` | Auto-generated | Directory for ternary outputs. |
-| `--plot_title` | String or `null` | Prediction filename | Ternary plot title. |
-| `--ternary_source` | `model`, `human`, `both` | `both` | Probability source displayed in ternary plots. |
-| `--ternary_browser` / `--no-ternary_browser` | Boolean | `true` | Also write an interactive HTML ternary plot with per-instance hover details. |
-| `--analysis` | Flag | `false` | Write disagreement-stratified metrics and instance-level errors. |
-| `--disagreement_groups` | Integer | `3` | Number of entropy/disagreement strata. |
-| `--disagreement_boundaries` | One or more floats | `null` | Explicit normalized-entropy cutoffs; provide `groups - 1` values. |
-| `--analysis-output-file` | JSON path or `null` | Next to evaluation output | Aggregate disagreement-analysis path. |
-| `--instance-errors-file` | CSV path or `null` | Next to analysis output | Per-instance error-table path. |
+| `--predictions` | JSON path | Required | Prediction file to evaluate. |
+| `--input_file` | JSON array path | Required | Prediction input; IDs must exactly match the prediction IDs. |
+| `--human_labels` | Annotated JSON array path | Required | Human annotation votes or distributions. |
+| `--output_file` | JSON path | `outputs/evaluation/results/<stem>__eval.json` | Aggregate-metrics output path. |
+| `--metrics` | One or more metric names | All supported metrics | Retain only the named metrics. |
+| `--config` | One or more JSON paths | Optional | Merged evaluation settings; CLI values override them. |
+| `--analysis` | Flag | Disabled | Write disagreement-stratified metrics and per-instance errors for categorical distribution labels. |
+| `--disagreement-groups` | Integer | `3` | Number of human-disagreement strata. |
+| `--disagreement-boundaries` | One or more floats | Automatic | Explicit normalized-entropy cutoffs. |
+| `--analysis-output-file` | JSON path | Next to evaluation output | Analysis-report path. |
+| `--instance-errors-file` | CSV path | Next to analysis output | Per-instance error-table path. |
+| `--ternary-plot` / `--no-ternary-plot` | Boolean | Disabled | Write ternary diagnostics for three-class categorical soft labels. |
+| `--ternary-plot-dir` | Directory path | `outputs/evaluation/figures` | Ternary-artifact directory. |
+| `--ternary-plot-title` | String | Prediction filename | Ternary-plot title. |
+| `--ternary-source` | `model`, `human`, `both` | `both` | Distribution source rendered in ternary plots. |
+| `--ternary-browser` / `--no-ternary-browser` | Boolean | Enabled with ternary plot | Also write interactive HTML. |
 
-## Seed-aggregated disagreement plots
+## Analysis
 
-After producing categorical evaluation artifacts with `evaluate --analysis`, run
-`spinda analyze --run-dirs` with one strategy root per label. It discovers every
-`seed_*/test` analysis JSON and instance-error CSV pair and creates two PNG/PDF
-diagnostics: group-level TVD with standard-deviation error bars, and an
-instance-level TVD violin plot with an embedded box plot. All inputs must use
-the same grouping; pass `--level` for one multi-dimensional annotation level.
+`analyze` pools artifacts created by `evaluate --analysis` across seed runs and writes one or both selected-metric plots: disagreement-stratified and instance-level.
+
+| Option | Accepted values | Default | Description |
+|---|---|---|---|
+| `--run-dirs` | One or more directories | One of this or `--analysis-files` is required | Strategy roots; discovers `seed_*/test/evaluation__analysis.json` and matching CSV files. |
+| `--analysis-files` | One or more JSON paths | One of this or `--run-dirs` is required | Explicit analysis reports. |
+| `--instance-errors-files` | One or more CSV paths | Required for explicit artifacts only when `--plots` includes `instance` | CSV paired with each explicit analysis report. Not needed for `stratified` only. |
+| `--labels` | One or more strings | Run-directory names | Display label per strategy or explicit artifact pair. |
+| `--metric` | `tvd`, `jsd`, `kl`, `ce`, `l2` | `tvd` | Metric plotted in either output type. |
+| `--plots` | One or both of `stratified`, `instance` | Both | Output figure types; `stratified` needs only analysis JSON, while `instance` also needs CSV errors. |
+| `--level` | Dimension name | `null` | Dimension to plot for multidimensional analyses. |
+| `--output-dir` | Directory path | `outputs/evaluation/disagreement_analysis` | Plot-output directory; writes `disagreement_<metric>` for stratified and `instance_<metric>_violin` for instance plots (PNG and PDF). |
+| `--title` | String | `null` | Optional plot title. |
 
 ## Advanced and runtime options
 

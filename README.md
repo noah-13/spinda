@@ -114,28 +114,37 @@ configuration precedence are in
 ### A spinda-trained model
 
 For a checkpoint trained above, prediction and evaluation connect directly:
-`predict` writes the JSON file that `evaluate` accepts, with no conversion.
+`predict` writes the JSON file that `evaluate` accepts, with no conversion. See the [prediction options](docs/configuration_reference.md#prediction).
 
 ```bash
 uv run spinda predict \
   --model_path outputs/chaosnli_example/seed_42/final_model \
-  --data_dir data/datasets/text_pair/chaosnli/mnli_m/0 \
-  --split test \
+  --input_file data/datasets/text_pair/chaosnli/mnli_m/0/test.json \
   --output_file outputs/chaosnli_example/seed_42/test/predictions.json
 
 uv run spinda evaluate \
   --predictions outputs/chaosnli_example/seed_42/test/predictions.json \
-  --data_dir data/datasets/text_pair/chaosnli/mnli_m/0 \
-  --analysis --no-plot \
+  --input_file data/datasets/text_pair/chaosnli/mnli_m/0/test.json \
+  --human_labels data/datasets/text_pair/chaosnli/mnli_m/0/test.json \
+  --metrics tvd kl entropy_correlation \
   --output_file outputs/chaosnli_example/seed_42/test/evaluation.json
 ```
+
+Not sure which metrics to pass? Start with the label structure:
+
+- **One hard label per example:** use `accuracy` or `macro_f1`; use macro-F1 when each class should contribute equally despite imbalance.
+- **Categorical human-label distributions:** use `tvd` for distributional discrepancy. The paper's compact reporting set adds `kl` and `entropy_correlation`; the [metric relationships](docs/evaluation_metrics.md#spearman-correlation-in-the-paper) page explains that choice and its correlation evidence.
+- **Independent multilabel probabilities:** use `macro_f1` for the hard-label result. For the paper's soft-label reporting set, add `soft_macro_f1`, `multilabel_pojsd`, and `multilabel_entropy_correlation`.
+- **Several annotation dimensions:** choose the categorical metrics per dimension; `evaluate` also reports their unweighted overall mean.
+
+The [evaluation metrics guide](docs/evaluation_metrics.md) defines every metric, its required inputs, and its direction; use the [metrics notebook](notebooks/metrics_tutorial.ipynb) to compare them on small controlled inputs. The [evaluation options](docs/configuration_reference.md#evaluation) list the accepted `--metrics` names and evaluation artifacts.
 
 ### An external model
 
 The evaluation and analysis commands also work independently of spinda
-training. Convert an external model's output into a `.json` top-level array;
-each record needs a matching `id`, probability vector in the dataset's class
-order, and its zero-based predicted class:
+training. Convert an external model's output to the [prediction JSON
+contract](docs/prediction_contract.md#prediction-json): a `.json` top-level
+array whose records have a matching `id`, a probability vector in the dataset's class order, and a zero-based predicted class:
 
 ```json
 [
@@ -143,70 +152,89 @@ order, and its zero-based predicted class:
 ]
 ```
 
+For multilabel tasks, use the same outer record structure; `outputs.probs` and
+`outputs.pred` are same-length vectors in label order, with zero-or-one values
+in `pred`. See the [multilabel prediction JSON contract](docs/prediction_contract.md#multilabel-prediction-json).
+
 Then run the same evaluator without loading any spinda checkpoint:
 
 ```bash
 uv run spinda evaluate \
   --predictions external_predictions.json \
-  --data_dir data/datasets/text_pair/chaosnli/mnli_m/0 \
-  --analysis --no-plot \
+  --input_file external_input.json \
+  --human_labels external_human_labels.json \
   --output_file outputs/external_model/evaluation.json
 ```
 
-The complete standalone input specification, including external ground truth
-and multi-dimensional outputs, is in
-[docs/prediction_contract.md](docs/prediction_contract.md).
+For [external human labels](docs/prediction_contract.md#evaluate-predictions)
+or [multidimensional outputs](docs/prediction_contract.md#multidimensional-prediction-json),
+use the corresponding prediction-contract variant.
 
-`evaluate --analysis` writes aggregate metrics, a disagreement-stratified
-report, and a per-instance error table. To compare strategies across several
-seeds, pass one run directory per strategy. spinda discovers the matching
-analysis artifacts beneath each `seed_*/test/` directory.
+For three-class soft-label data, `evaluate` can also write a static ternary PNG
+and an interactive HTML diagnostic with per-instance hover details. It is
+opt-in: pass `--ternary-plot` to write it, or use `--no-ternary-browser` to write only
+the PNG.
+
+## Analyze across seed runs
+
+Add `--analysis` to an `evaluate` command only when you need
+disagreement-stratified metrics and a per-instance error table. It writes
+`evaluation__analysis.json` and `evaluation__analysis__instance_errors.csv`
+beside the evaluation output. `spinda analyze` pools those artifacts and writes
+a disagreement-stratified plot and an instance-level violin plot for the selected metric.
+
+### Discover artifacts from run directories
+
+Pass one strategy root per method with `--run-dirs`. SPInDa discovers each
+`seed_*/test/evaluation__analysis.json` file and its paired CSV automatically.
+Use `--labels` for display names; otherwise the directory names are used.
 
 ```bash
 uv run spinda analyze --run-dirs \
   outputs/chaosnli/mnli_m/fold_0/roberta-base__soft_to_hard__ce \
   outputs/chaosnli/mnli_m/fold_0/roberta-base__soft__rel \
   --labels Hard_CE ReL \
+  --metric tvd \
+  --plots stratified \
   --output-dir outputs/disagreement_analysis
 ```
 
-This produces group-level TVD comparisons with cross-seed error bars and
-instance-level TVD violin plots.
+### Supply artifact files explicitly
+
+Use `--analysis-files` when the reports are not arranged beneath strategy roots.
+For an instance plot, pass one matching `--instance-errors-files` CSV and one `--labels` value for every analysis JSON. A stratified-only plot needs only the JSON reports.
+
+```bash
+uv run spinda analyze \
+  --analysis-files outputs/hard/evaluation__analysis.json outputs/rel/evaluation__analysis.json \
+  --instance-errors-files outputs/hard/evaluation__analysis__instance_errors.csv outputs/rel/evaluation__analysis__instance_errors.csv \
+  --labels Hard_CE ReL \
+  --metric kl \
+  --plots instance \
+  --output-dir outputs/disagreement_analysis
+```
+
+Select `--metric` from `tvd`, `jsd`, `kl`, `ce`, and `l2`. Use `--plots
+stratified` or `--plots instance` to write only one figure type; omit `--plots`
+to write both. The instance plot requires its paired CSV, while the stratified
+plot needs only the analysis JSON. Use `--level LEVEL` for one dimension of a
+multidimensional analysis, `--title` to set the plot title, and `--output-dir`
+to choose where PNG and PDF files are written. All supplied artifacts must use
+the same disagreement grouping. See the [analysis options](docs/configuration_reference.md#analysis)
+for the full reference.
+
+When both plot types are selected with the default `--metric tvd`, the outputs look as follows:
 
 | Disagreement-stratified TVD | Instance-level TVD |
 | --- | --- |
 | ![TVD by disagreement level](docs/assets/disagreement_tvd_example.png) | ![Instance-level TVD violin plot](docs/assets/instance_tvd_violin_example.png) |
-
-For three-class soft-label data, `evaluate` can also write a static ternary PNG
-and an interactive HTML diagnostic with per-instance hover details. It is
-optional: use `--no-plot` to skip it, or `--no-ternary-browser` to write only
-the PNG.
-
-## Choose evaluation metrics
-
-Match the metric to the target your task actually provides:
-
-| Target | Primary metric | Useful complement |
-| --- | --- | --- |
-| One hard label per example | Accuracy or macro-F1 | Per-class F1 for imbalance |
-| Categorical human label distribution | TVD | KL and entropy correlation |
-| Independent multi-label probabilities | Macro-F1 | Soft macro-F1, multilabel PO-JSD, and entropy correlation |
-| Multi-dimensional labels | Report the primary metric per level | Unweighted mean across levels |
-
-Follow the paper's compact reporting sets: TVD with KL and entropy correlation
-for categorical HLV, and macro-F1 with soft macro-F1, PO-JSD, and entropy
-correlation for multi-label HLV. Do not report TVD and JSD as co-primary
-results: they are nearly redundant in the included categorical experiments. The
-[evaluation metric guide](docs/evaluation_metrics.md) explains the choices and
-shows the correlation evidence.
 
 ## Learn more
 
 - [Data layout and public dataset format](data/README.md)
 - [Configuration reference](docs/configuration_reference.md)
 - [Prediction JSON contract](docs/prediction_contract.md)
-- [How to choose evaluation metrics](docs/evaluation_metrics.md)
-- [HLV metric tutorial](docs/hlv_metrics_tutorial.md)
+- [Evaluation metrics](docs/evaluation_metrics.md)
 
 spinda supports text-pair and single-text classification, multi-label data, and
 multi-dimensional annotations. The repository's canonical launchers for

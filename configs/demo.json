@@ -1,0 +1,19 @@
+{
+  "format": "text_pair_label_distribution",
+  "label_mode": "soft",
+  "labels": ["entailment", "neutral", "contradiction"],
+  "train_path": "data/datasets/text_pair/chaosnli/mnli_m/0/train.json",
+  "dev_path": "data/datasets/text_pair/chaosnli/mnli_m/0/dev.json",
+  "model": "prajjwal1/bert-tiny",
+  "device": "auto",
+  "output_dir": "outputs/demo",
+  "num_epochs": 1,
+  "learning_rate": 5e-5,
+  "train_batch_size": 16,
+  "eval_batch_size": 32,
+  "max_length": 128,
+  "seeds": [42],
+  "dataloader_num_workers": 0,
+  "label_training_strategy": "jsd",
+  "soft_label_metric_for_best_model": "tvd"
+}

@@ -46,7 +46,6 @@ scripts/*_parallel.sh
 scripts/predict_*.sh
 scripts/standard_predict_eval_parallel.sh
 scripts/humans_and_multipico_all_runs.sh
-scripts/multipico.sh
 scripts/discogem/*_parallel.sh
 scripts/discogem_multilevel_11parts/
 scripts/md_agreement_parts/

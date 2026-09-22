@@ -49,7 +49,7 @@ raise SystemExit(not required.issubset(metrics))
     if [[ ! -s "$predictions" ]]; then
       echo "Generating test predictions: $seed_dir"
       uv run python -m hlv_toolkits.scripts.predict \
-        --model_path "$model_dir" --data_dir "$dataset_dir" --split test \
+        --model_path "$model_dir" --input_file "$dataset_dir/test.json" --config "$dataset_config" \
         --device cuda:0 --batch_size "$PREDICT_BATCH_SIZE" --max_length "$PREDICT_MAX_LENGTH" \
         --output_file "$predictions"
     else
@@ -58,8 +58,9 @@ raise SystemExit(not required.issubset(metrics))
 
     echo "Evaluating test predictions: $seed_dir"
     uv run python -m hlv_toolkits.scripts.evaluate \
-      --predictions "$predictions" --data_dir "$dataset_dir" --ground_truth_split test \
-      --output_file "$evaluation" --no-plot
+      --predictions "$predictions" --input_file "$dataset_dir/test.json" \
+      --human_labels "$dataset_dir/test.json" \
+      --output_file "$evaluation"
   done < <(find "$run_dir" -type f -path '*/seed_*/final_model/config.json' -print0 | sort -z)
 }
 

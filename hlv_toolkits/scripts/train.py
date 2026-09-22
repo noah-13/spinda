@@ -99,13 +99,6 @@ def main() -> None:
 
     # Data configuration
     parser.add_argument(
-        "--data_source",
-        type=str,
-        default="text_pair",
-        choices=["text_pair", "single_text", "single_text_multilabel", "multilevel"],
-        help="Training data source; text_pair and multilevel use JSON dataset contracts",
-    )
-    parser.add_argument(
         "--format",
         dest="data_format",
         type=str,
@@ -246,13 +239,9 @@ def main() -> None:
     valid_config_keys = {action.dest for action in parser._actions} - {"config", "help"}
     config_values = _load_merged_json_configs(bootstrap_args.config, valid_config_keys)
     args = parser.parse_args(namespace=argparse.Namespace(**config_values))
-    direct_dataset_options = (args.data_format, args.train_path, args.dev_path, args.labels, args.level_labels, args.label_mode)
-    if any(value is not None for value in direct_dataset_options):
-        if args.data_source not in {"text_pair", "single_text", "single_text_multilabel", "multilevel"}:
-            raise ValueError("format/train_path/dev_path/labels/level_labels/label_mode are only valid for direct JSON training.")
     if args.data_format not in DATA_FORMAT_SPECS:
         raise ValueError("format is required and must identify a supported dataset contract.")
-    args.data_source, args.head_type = DATA_FORMAT_SPECS[args.data_format]
+    input_kind, args.head_type = DATA_FORMAT_SPECS[args.data_format]
     device = args.device
     if device == "auto":
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -270,13 +259,13 @@ def main() -> None:
     print(f"Using device: {device}")
 
     # Load data
-    print(f"Loading dataset from source: {args.data_source}")
+    print(f"Loading dataset with format: {args.data_format}")
     num_labels = 0
     label_names = None
-    multilevel_head = args.data_source == "multilevel"
+    multilevel_head = input_kind == "multilevel"
     multilevel_label_sizes = None
 
-    if args.data_source == "text_pair":
+    if input_kind == "text_pair":
         if args.data_format != "text_pair_label_distribution":
             raise ValueError("--format text_pair_label_distribution is required for text-pair training.")
         if not args.train_path:
@@ -297,14 +286,14 @@ def main() -> None:
         else:
             eval_samples = None
             warnings.warn("No dev_path was provided: evaluation is disabled and final_model will be the last epoch model.", UserWarning, stacklevel=2)
-    elif args.data_source == "single_text":
+    elif input_kind == "single_text":
         if args.data_format != "single_text_label_distribution" or not args.train_path:
             raise ValueError("--format single_text_label_distribution and --train_path are required for single-text training.")
         reader = SingleTextClassificationJSONReader(data_format=args.data_format, train_path=args.train_path, dev_path=args.dev_path, labels=args.labels, label_mode=args.label_mode)
         num_labels, label_names, args.use_soft_labels = len(reader.labels), reader.labels, reader.use_soft_labels
         train_samples = reader.load_train()
         eval_samples = reader.load_dev() if reader.has_dev else None
-    elif args.data_source == "single_text_multilabel":
+    elif input_kind == "single_text_multilabel":
         if args.data_format != "single_text_multilabel_annotation_distribution" or not args.train_path:
             raise ValueError("--format single_text_multilabel_annotation_distribution and --train_path are required for MFRC training.")
         if args.label_mode not in {"soft", "soft_to_hard"}:
@@ -316,7 +305,7 @@ def main() -> None:
         args.use_soft_labels = args.label_mode == "soft"
         train_samples = reader.load_train()
         eval_samples = reader.load_dev() if reader.has_dev else None
-    elif args.data_source == "multilevel":
+    elif input_kind == "multilevel":
         if args.data_format not in {"text_pair_multidimensional_label_distribution", "single_text_multidimensional_label_distribution"}:
             raise ValueError("--format text_pair_multidimensional_label_distribution or single_text_multidimensional_label_distribution is required for multilevel JSON training.")
         if not args.train_path:
@@ -344,7 +333,7 @@ def main() -> None:
             eval_samples = None
             warnings.warn("No dev_path was provided: evaluation is disabled and final_model will be the last epoch model.", UserWarning, stacklevel=2)
     else:
-        raise ValueError(f"Unknown direct data source: {args.data_source}")
+        raise ValueError(f"Unknown input kind derived from format: {input_kind}")
 
     args.use_soft_labels = bool(args.use_soft_labels)
 
@@ -372,7 +361,7 @@ def main() -> None:
         # Create wandb run name if enabled
         wandb_run_name = args.wandb_run_name
         if args.use_wandb and wandb_run_name is None:
-            wandb_run_name = f"{args.data_source}__{args.model}__seed_{seed}"
+            wandb_run_name = f"{args.data_format}__{args.model}__seed_{seed}"
 
         # Create training config for this seed
         config = TrainingConfig(
@@ -388,7 +377,7 @@ def main() -> None:
             max_length=args.max_length,
             has_eval=eval_samples is not None,
             use_soft_labels=args.use_soft_labels,
-            use_soft_eval_metrics=(args.data_source in {"text_pair", "single_text", "multilevel", "single_text_multilabel"} and args.label_mode == "soft_to_hard"),
+            use_soft_eval_metrics=(args.label_mode == "soft_to_hard"),
             soft_label_loss=args.soft_label_loss,
             soft_label_metric_for_best_model=args.soft_label_metric_for_best_model,
             multilabel_metric_for_best_model=args.multilabel_metric_for_best_model,

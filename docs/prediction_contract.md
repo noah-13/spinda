@@ -1,108 +1,172 @@
 # Prediction contract
 
-`hlv_toolkits.scripts.evaluate` is model-agnostic: it evaluates a JSON
-prediction file produced by this toolkit or by any external system. It does
-not load external model checkpoints.
+`spinda predict` generates predictions from a checkpoint trained by this
+repository. `spinda evaluate` is model-agnostic: it evaluates prediction JSON
+from SPInDa or any external system, and never loads a model checkpoint.
 
-## Required inputs
+## Generate predictions with SPInDa
 
-Evaluation requires both of the following:
+`predict` needs a checkpoint and an input JSON array. Each row must have a
+unique string `id` and exactly one input shape:
 
-1. A prediction JSON file following the record format below.
-2. Either a processed dataset directory containing `dataset.json` and the
-   requested split (normally `test.json`), or a lightweight external
-   ground-truth JSON file. The dataset manifest is the source of truth for
-   the task, class order, and human labels when using `--data_dir`.
+- Text pair: `text_a` and `text_b`, both strings.
+- Single text: `text`, a string.
 
-For example, to evaluate an external model on ChaosNLI:
-
-```bash
-uv run python -m hlv_toolkits.scripts.evaluate \
-  --predictions external_predictions.json \
-  --data_dir data/datasets/text_pair/chaosnli/snli/0 \
-  --ground_truth_split test \
-  --output_file results/external_model.json
-```
-
-## External ground-truth JSON
-
-To evaluate without a repository dataset, pass `--ground_truth` instead of
-`--data_dir`. Write a top-level JSON array of example objects:
+Extra fields, including annotations, are ignored during prediction.
 
 ```json
 [
-  {"id":"example-0001","label":1,"human_dist":[0.10,0.75,0.15]}
+  {
+    "id": "example-0001",
+    "text_a": "A dog is running.",
+    "text_b": "An animal is moving."
+  }
 ]
 ```
 
-- `id` and zero-based integer `label` are required.
-- `human_dist` is optional, but if it is present it must be present for every
-  record. It enables distributional metrics; without it, evaluation reports
-  hard-label accuracy only.
-- The class-index order of `label` and `human_dist` must match the prediction
-  file's `outputs.pred` and `outputs.probs`.
-- Unknown fields are optional metadata and are ignored.
+```bash
+uv run spinda predict \
+  --model_path outputs/model/seed_42/final_model \
+  --input_file input.json \
+  --output_file predictions.json
+```
+
+The command writes an object with a `predictions` array. It may also include
+checkpoint label names in a top-level `labels` field.
+
+## Evaluate predictions
+
+`evaluate` requires all three of these files:
+
+- `--predictions`: a prediction JSON file following one of the output contracts
+  below.
+- `--input_file`: the input JSON used for inference. Its IDs must exactly match
+  the prediction IDs. It can be the same file as `--human_labels`.
+- `--human_labels`: an annotated JSON array with the matching IDs and text
+  fields. Its annotation field depends on the prediction kind.
+
+For example, an annotated ChaosNLI test file can serve as both input and
+human-label source:
 
 ```bash
-uv run python -m hlv_toolkits.scripts.evaluate \
-  --predictions external_predictions.json \
-  --ground_truth external_ground_truth.json \
-  --no-plot
+uv run spinda evaluate \
+  --predictions predictions.json \
+  --input_file data/datasets/chaosnli/test.json \
+  --human_labels data/datasets/chaosnli/test.json \
+  --output_file evaluation.json
 ```
+
+The evaluator infers whether the predictions are categorical, multilabel, or
+multidimensional from `outputs`; no task format or dataset directory is
+required.
 
 ## Prediction JSON
 
-Write a `.json` file containing a top-level array. Each record requires `id`,
-`outputs.probs`, and `outputs.pred`:
+The evaluator accepts either a top-level array or an object with a
+`predictions` array. Every prediction record needs an `id` and `outputs`.
+Top-level record fields such as `source`, `task`, and `split` are optional
+metadata and do not affect metrics.
+
+### Categorical output
 
 ```json
 [
-  {"id":"example-0001","outputs":{"probs":[0.10,0.75,0.15],"pred":1}}
+  {
+    "id": "example-0001",
+    "outputs": {"probs": [0.10, 0.75, 0.15], "pred": 1}
+  }
 ]
 ```
 
-- `id` must exactly match the ID in the evaluated dataset split.
-- `outputs.probs` must be a probability vector in the class order specified
-  by `dataset.json`'s `labels` field. It is required for distributional
-  metrics such as TVD, JSD, KL, and soft F1.
-- `outputs.pred` is the zero-based predicted class index. It should normally
-  be `argmax(outputs.probs)`.
+`outputs.probs` is a probability vector; `outputs.pred` is its zero-based
+predicted class, normally `argmax(probs)`. The probability and class indices
+must use the same order as the integer votes in `annotation_labels`.
 
-This toolkit's `predict` command emits the same records, with additional
-`task`, `split`, and `source` fields, in a `predictions.json` top-level array.
-It can be passed to `evaluate` unchanged.
+The corresponding human-label row has a non-empty integer `annotation_labels`
+array:
 
-## Multidimensional prediction JSON
+```json
+{
+  "id": "example-0001",
+  "text_a": "A dog is running.",
+  "text_b": "An animal is moving.",
+  "annotation_labels": [1, 1, 0, 2]
+}
+```
 
-For manifests with format `text_pair_multidimensional_label_distribution` or
-`single_text_multidimensional_label_distribution`, `predict` emits one categorical
-output per level. Pass that JSON to `evaluate` unchanged:
+### Multilabel output
+
+Multilabel predictions use the same record structure. `outputs.probs` and
+`outputs.pred` are same-length vectors in label order; `pred` has a zero-or-one
+decision for each label.
 
 ```json
 [
-  {"id":"example-0001","outputs":{"dimensions":{"level1":{"probs":[0.10,0.90],"pred":1},"level2":{"probs":[0.75,0.25],"pred":0},"level3":{"probs":[0.20,0.80],"pred":1}}}}
+  {
+    "id": "example-0001",
+    "outputs": {"probs": [0.90, 0.20, 0.55], "pred": [1, 0, 1]}
+  }
 ]
 ```
 
-- Each manifest-defined dimension requires `probs` and `pred`.
-- Each probability-vector order is the matching `level_labels.<level>` order
-  in `dataset.json`.
-- Evaluation reports metrics for every level and an unweighted mean under
-  `overall`.
+The matching human-label row uses `annotation_label_sets`: a non-empty array
+of annotation votes, with each vote expressed as the list of active zero-based
+labels.
 
-## Optional metadata
+```json
+{
+  "id": "example-0001",
+  "text": "An example document.",
+  "annotation_label_sets": [[0, 2], [0], [0, 2]]
+}
+```
 
-Any top-level fields besides the required fields are optional metadata and are
-ignored by metric computation. This includes `task`, `split`, `source`,
-`extras`, and producer-specific fields such as `model_name`, `checkpoint`,
-`seed`, `timestamp`, or `git_commit`.
+### Multidimensional output
 
-Metadata is useful for provenance, but it must not be relied on to choose the
-ground truth or label order; pass the intended dataset directory explicitly
-with `--data_dir` instead.
+Multidimensional predictions have one categorical output per named dimension.
+Each dimension must appear in every record.
 
-## Scope
+```json
+[
+  {
+    "id": "example-0001",
+    "outputs": {
+      "dimensions": {
+        "level1": {"probs": [0.10, 0.90], "pred": 1},
+        "level2": {"probs": [0.75, 0.25], "pred": 0}
+      }
+    }
+  }
+]
+```
 
-The toolkit provides prediction for checkpoints trained by this repository.
-For models trained elsewhere, use their native inference code to produce the
-JSON file above, then use this toolkit only for evaluation.
+The corresponding `annotation_labels` value is an object with the same
+ordered dimensions, each containing a non-empty array of integer votes:
+
+```json
+{
+  "id": "example-0001",
+  "text_a": "A dog is running.",
+  "text_b": "An animal is moving.",
+  "annotation_labels": {
+    "level1": [1, 1, 0],
+    "level2": [0, 0, 1]
+  }
+}
+```
+
+Evaluation reports metrics for every dimension and their unweighted mean under
+`overall`.
+
+## Optional artifacts
+
+Add `--analysis` to write disagreement-stratified metrics and per-instance
+errors. It requires categorical distribution labels, including each dimension
+of a multidimensional task. Add `--ternary-plot` to write ternary diagnostics
+for three-class categorical soft-label predictions; it is disabled by default.
+
+## External models
+
+Use the external model native inference code to produce one of the prediction
+JSON forms above, then pass it to `spinda evaluate` with the matching input and
+human-label files. External predictions are not loaded through `spinda predict`.

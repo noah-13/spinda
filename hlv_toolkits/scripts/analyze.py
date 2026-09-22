@@ -28,7 +28,7 @@ def _read_analysis(path: Path, level: str | None) -> dict[str, Any]:
         raise ValueError(f"{path} is not a categorical SPInDa analysis JSON.") from error
 
 
-def _read_tvd_errors(path: Path, level: str | None) -> np.ndarray:
+def _read_metric_errors(path: Path, level: str | None, metric: str) -> np.ndarray:
     with path.open(encoding="utf-8", newline="") as handle:
         rows = list(csv.DictReader(handle))
     if level is not None:
@@ -36,19 +36,20 @@ def _read_tvd_errors(path: Path, level: str | None) -> np.ndarray:
     if not rows:
         raise ValueError(f"{path} has no instance errors" + (f" for {level!r}." if level else "."))
     try:
-        values = np.asarray([float(row["tvd"]) for row in rows], dtype=float)
+        values = np.asarray([float(row[metric]) for row in rows], dtype=float)
     except (KeyError, ValueError) as error:
-        raise ValueError(f"{path} must contain a numeric tvd column.") from error
+        raise ValueError(f"{path} must contain a numeric {metric} column.") from error
     if not np.isfinite(values).all():
-        raise ValueError(f"{path} contains non-finite TVD values.")
+        raise ValueError(f"{path} contains non-finite {metric} values.")
     return values
 
 
-def _save_disagreement_tvd(
+def _save_disagreement_metric(
     values: dict[str, dict[str, list[float]]],
     groups: tuple[str, ...],
     output: Path,
     title: str | None,
+    metric: str,
 ) -> None:
     import matplotlib.pyplot as plt
 
@@ -61,7 +62,7 @@ def _save_disagreement_tvd(
         axis.errorbar(x, means, yerr=deviations, marker="o", capsize=3, linewidth=1.8, label=label, color=STRATEGY_COLORS[index % len(STRATEGY_COLORS)])
     axis.set_xticks(x, tuple(group.replace("_", " ").title() for group in groups))
     axis.set_xlabel("Human disagreement group")
-    axis.set_ylabel("TVD")
+    axis.set_ylabel(metric.upper())
     axis.set_ylim(bottom=0)
     axis.grid(axis="y", linestyle="--", linewidth=0.6, alpha=0.35)
     if title:
@@ -78,7 +79,7 @@ def _save_disagreement_tvd(
     plt.close(figure)
 
 
-def _save_instance_tvd_violin(values: dict[str, list[float]], output: Path, title: str | None) -> None:
+def _save_instance_metric_violin(values: dict[str, list[float]], output: Path, title: str | None, metric: str) -> None:
     import matplotlib.pyplot as plt
 
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -104,7 +105,7 @@ def _save_instance_tvd_violin(values: dict[str, list[float]], output: Path, titl
     for index, series in enumerate(series_by_label, start=1):
         axis.scatter(index, np.mean(series), color="black", s=18, zorder=5)
     axis.set_xticks(range(1, len(labels) + 1), labels)
-    axis.set_ylabel("Instance-level TVD")
+    axis.set_ylabel(f"Instance-level {metric.upper()}")
     axis.set_ylim(bottom=0)
     axis.grid(axis="y", linestyle="--", linewidth=0.6, alpha=0.35)
     if title:
@@ -135,12 +136,21 @@ def main() -> None:
         "--labels", nargs="+",
         help="One display label per run directory, or per explicit artifact pair.",
     )
+    parser.add_argument(
+        "--metric", choices=("tvd", "jsd", "kl", "ce", "l2"), default="tvd",
+        help="Per-instance and disagreement-stratified metric to plot (default: tvd).",
+    )
+    parser.add_argument(
+        "--plots", nargs="+", choices=("stratified", "instance"),
+        default=("stratified", "instance"),
+        help="Plot types to write: disagreement strata, instance distribution, or both.",
+    )
     parser.add_argument("--level", help="Dimension to plot for multi-dimensional analyses.")
     parser.add_argument("--output-dir", type=Path, default=Path("outputs/evaluation/disagreement_analysis"))
     parser.add_argument("--title", default=None)
     args = parser.parse_args()
 
-    artifact_pairs: list[tuple[Path, Path, str]] = []
+    artifact_pairs: list[tuple[Path, Path | None, str]] = []
     if args.run_dirs:
         labels = args.labels or [run_dir.name for run_dir in args.run_dirs]
         if len(labels) != len(args.run_dirs):
@@ -151,15 +161,22 @@ def main() -> None:
                 parser.error(f"{run_dir} has no seed_*/test/evaluation__analysis.json artifacts. Run evaluate --analysis first.")
             for analysis_path in analysis_paths:
                 errors_path = analysis_path.with_name(analysis_path.stem + "__instance_errors.csv")
-                if not errors_path.is_file():
+                if "instance" in args.plots and not errors_path.is_file():
                     parser.error(f"Missing instance-error CSV beside {analysis_path}.")
-                artifact_pairs.append((analysis_path, errors_path, label))
+                artifact_pairs.append((analysis_path, errors_path if errors_path.is_file() else None, label))
     else:
-        if not args.analysis_files or not args.instance_errors_files or not args.labels:
-            parser.error("--analysis-files requires --instance-errors-files and --labels.")
-        if not (len(args.analysis_files) == len(args.instance_errors_files) == len(args.labels)):
-            parser.error("--analysis-files, --instance-errors-files, and --labels must have the same length.")
-        artifact_pairs = list(zip(args.analysis_files, args.instance_errors_files, args.labels))
+        if not args.analysis_files or not args.labels:
+            parser.error("--analysis-files requires --labels.")
+        if len(args.analysis_files) != len(args.labels):
+            parser.error("--analysis-files and --labels must have the same length.")
+        if "instance" in args.plots:
+            if not args.instance_errors_files:
+                parser.error("--instance-errors-files is required when --plots includes instance.")
+            if len(args.analysis_files) != len(args.instance_errors_files):
+                parser.error("--analysis-files and --instance-errors-files must have the same length.")
+            artifact_pairs = list(zip(args.analysis_files, args.instance_errors_files, args.labels))
+        else:
+            artifact_pairs = [(analysis_path, None, label) for analysis_path, label in zip(args.analysis_files, args.labels)]
 
     by_label_group: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     by_label_errors: dict[str, list[float]] = defaultdict(list)
@@ -176,15 +193,28 @@ def main() -> None:
             raise ValueError("All analysis artifacts must use the same disagreement grouping.")
         for group in current_group_names:
             metrics = groups[group].get("metrics")
-            if not metrics or "tvd" not in metrics:
-                raise ValueError(f"{analysis_path} has no TVD result for the {group} group.")
-            by_label_group[label][group].append(float(metrics["tvd"]))
-        by_label_errors[label].extend(_read_tvd_errors(errors_path, args.level).tolist())
+            if not metrics or args.metric not in metrics:
+                raise ValueError(f"{analysis_path} has no {args.metric} result for the {group} group.")
+            by_label_group[label][group].append(float(metrics[args.metric]))
+        if "instance" in args.plots:
+            if errors_path is None:
+                raise RuntimeError("Instance plots require an instance-error CSV.")
+            by_label_errors[label].extend(_read_metric_errors(errors_path, args.level, args.metric).tolist())
 
     assert group_names is not None
+    stratified_stem = f"disagreement_{args.metric}"
+    instance_stem = f"instance_{args.metric}_violin"
     for suffix in ("png", "pdf"):
-        _save_disagreement_tvd(by_label_group, group_names, args.output_dir / f"disagreement_tvd.{suffix}", args.title)
-        _save_instance_tvd_violin(by_label_errors, args.output_dir / f"instance_tvd_violin.{suffix}", args.title)
+        if "stratified" in args.plots:
+            _save_disagreement_metric(
+                by_label_group, group_names, args.output_dir / f"{stratified_stem}.{suffix}",
+                args.title, args.metric,
+            )
+        if "instance" in args.plots:
+            _save_instance_metric_violin(
+                by_label_errors, args.output_dir / f"{instance_stem}.{suffix}",
+                args.title, args.metric,
+            )
     print(f"Disagreement-analysis plots saved to {args.output_dir}")
 
 

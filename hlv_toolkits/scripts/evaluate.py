@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from hlv_toolkits.data import (
     SingleTextClassificationJSONReader,
+    SingleTextClassificationSample,
     SingleTextDistributionSample,
     SingleTextMultilabelJSONReader,
     SingleTextMultilabelDistributionSample,
@@ -37,6 +38,79 @@ from hlv_toolkits.data.json_io import load_records
 
 
 MultilevelGroundTruthSample = Union[MultilevelSample, SingleTextMultilevelSample]
+
+
+EVALUATION_CONFIG_KEYS = {
+    "predictions", "predictions_format", "input_file", "human_labels",
+    "output_file", "metrics", "ternary_plot", "ternary_plot_dir", "ternary_plot_title",
+    "ternary_source", "ternary_browser", "analysis", "disagreement_groups",
+    "disagreement_boundaries", "analysis_output_file", "instance_errors_file",
+}
+
+
+def _load_json_config(path: str) -> dict[str, Any]:
+    config_path = Path(path)
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except FileNotFoundError as error:
+        raise FileNotFoundError(f"Evaluation config not found: {config_path}") from error
+    except json.JSONDecodeError as error:
+        raise ValueError(f"Invalid JSON in evaluation config {config_path}: {error}") from error
+    if not isinstance(config, dict):
+        raise ValueError(f"Evaluation config {config_path} must be a JSON object.")
+    unknown = sorted(set(config) - EVALUATION_CONFIG_KEYS)
+    if unknown:
+        raise ValueError(f"Unknown evaluation config keys in {config_path}: {', '.join(unknown)}")
+    return config
+
+
+def _load_merged_json_configs(paths: list[str]) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    for path in paths:
+        merged.update(_load_json_config(path))
+    return merged
+
+
+def _infer_prediction_kind(predictions: Sequence[PredictionRecord]) -> str:
+    """Infer the output contract; format remains training-only metadata."""
+    if not predictions:
+        raise ValueError("Prediction file is empty.")
+    kinds: set[str] = set()
+    for prediction in predictions:
+        outputs = prediction.outputs
+        if isinstance(outputs.get("dimensions"), dict):
+            kinds.add("multilevel")
+        elif isinstance(outputs.get("pred"), list):
+            kinds.add("multilabel")
+        elif isinstance(outputs.get("pred"), int):
+            kinds.add("categorical")
+        else:
+            raise ValueError(f"Prediction {prediction.id} has no recognized output shape.")
+    if len(kinds) != 1:
+        raise ValueError("Prediction file mixes categorical, multilabel, and multilevel output shapes.")
+    return kinds.pop()
+
+
+def _filter_metrics(results: Dict[str, Any], metrics: Optional[Sequence[str]]) -> Dict[str, Any]:
+    if metrics is None:
+        return results
+    requested = set(metrics)
+    if not requested or any(not isinstance(metric, str) or not metric for metric in metrics):
+        raise ValueError("metrics must be a non-empty list of metric names when provided.")
+
+    def select(values: Dict[str, Any]) -> Dict[str, Any]:
+        return {name: value for name, value in values.items() if name in requested}
+
+    if "overall" in results and all(isinstance(value, dict) for value in results.values()):
+        available = {name for values in results.values() for name in values}
+        unknown = sorted(requested - available)
+        if unknown:
+            raise ValueError(f"Unsupported metrics for these predictions: {', '.join(unknown)}")
+        return {level: select(values) for level, values in results.items()}
+    unknown = sorted(requested - set(results))
+    if unknown:
+        raise ValueError(f"Unsupported metrics for these predictions: {', '.join(unknown)}")
+    return select(results)
 
 
 def _get_multilevel_prediction_payload(
@@ -99,8 +173,15 @@ def load_predictions(
         raise ValueError(f"Unsupported predictions_format={predictions_format!r}")
     if file_path.suffix != ".json":
         raise ValueError(f"Prediction input must be a .json file containing a top-level array, got {file_path}.")
+    try:
+        payload = json.loads(file_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ValueError(f"Invalid JSON in prediction file {file_path}: {error}") from error
+    records = payload.get("predictions") if isinstance(payload, dict) else payload
+    if not isinstance(records, list):
+        raise ValueError(f"{file_path} must contain a prediction array or an object with predictions.")
     predictions = []
-    for index, data in enumerate(load_records(file_path, kind="predictions"), 1):
+    for index, data in enumerate(records, 1):
         if not isinstance(data, dict):
             raise ValueError(f"Prediction {index} in {file_path} must be a JSON object.")
         try:
@@ -110,86 +191,112 @@ def load_predictions(
     return predictions
 
 
-def load_ground_truth(file_path: Path) -> List[TextPairClassificationSample]:
-    """Load lightweight external ground truth JSON, ignoring extra metadata."""
-    rows: List[tuple[str, int, Optional[List[float]]]] = []
-    for line_num, data in enumerate(load_records(file_path, kind="ground-truth records"), 1):
-        if not isinstance(data, dict):
-            raise ValueError(f"Ground truth record {line_num} in {file_path} must be a JSON object.")
-        try:
-            sample_id = data["id"]
-            label = data["label"]
-        except KeyError as error:
-            raise ValueError(
-                f"Ground truth on line {line_num} requires {error.args[0]!r}."
-            ) from error
-        if not isinstance(sample_id, str) or not isinstance(label, int):
-            raise ValueError(f"Ground truth on line {line_num} requires string id and integer label.")
-        human_dist = data.get("human_dist")
-        if human_dist is not None and (
-            not isinstance(human_dist, list)
-            or not all(isinstance(value, (int, float)) for value in human_dist)
-        ):
-            raise ValueError(f"Ground truth human_dist on line {line_num} must be a numeric list.")
-        rows.append((sample_id, label, human_dist))
+def load_human_labels(
+    file_path: Path, prediction_kind: str,
+) -> list[Union[TextPairClassificationSample, TextPairDistributionSample, SingleTextClassificationSample, SingleTextDistributionSample, SingleTextMultilabelDistributionSample, MultilevelSample, SingleTextMultilevelSample]]:
+    """Load a test JSON that contains human annotations, inferring its supported contract."""
+    rows = list(load_records(file_path, kind="human-label test records"))
+    if not rows:
+        raise ValueError(f"Human-label test file is empty: {file_path}")
+    if not all(isinstance(row, dict) for row in rows):
+        raise ValueError(f"{file_path} must be a top-level JSON array of objects.")
+    records = [row for row in rows if isinstance(row, dict)]
+    seen: set[str] = set()
+    shapes: set[str] = set()
+    for index, row in enumerate(records, 1):
+        identifier = row.get("id")
+        if not isinstance(identifier, str) or not identifier or identifier in seen:
+            raise ValueError(f"Record {index} in {file_path} requires a unique non-empty string id.")
+        seen.add(identifier)
+        if isinstance(row.get("text_a"), str) and isinstance(row.get("text_b"), str) and "text" not in row:
+            shapes.add("pair")
+        elif isinstance(row.get("text"), str) and "text_a" not in row and "text_b" not in row:
+            shapes.add("single")
+        else:
+            raise ValueError(f"Record {index} in {file_path} must contain either text_a/text_b or text.")
+    if len(shapes) != 1:
+        raise ValueError(f"{file_path} mixes text-pair and single-text records.")
+    shape = shapes.pop()
 
-    has_distributions = any(human_dist is not None for _, _, human_dist in rows)
-    if has_distributions and any(human_dist is None for _, _, human_dist in rows):
-        raise ValueError("External ground truth must provide human_dist for every record or for none.")
-    if has_distributions:
-        return [
-            TextPairDistributionSample(
-                id=sample_id,
-                task="external_ground_truth",
-                label=label,
-                human_dist=human_dist or [],
-            )
-            for sample_id, label, human_dist in rows
-        ]
-    return [
-        TextPairClassificationSample(id=sample_id, task="external_ground_truth", label=label)
-        for sample_id, label, _ in rows
-    ]
+    if prediction_kind == "categorical":
+        votes_by_row: list[list[int]] = []
+        for index, row in enumerate(records, 1):
+            votes = row.get("annotation_labels")
+            if not isinstance(votes, list) or not votes or any(isinstance(v, bool) or not isinstance(v, int) or v < 0 for v in votes):
+                raise ValueError(f"Record {index} in {file_path} must contain non-empty integer annotation_labels for categorical evaluation.")
+            votes_by_row.append(votes)
+        width = max(max(votes) for votes in votes_by_row) + 1
+        samples = []
+        for row, votes in zip(records, votes_by_row):
+            counts = [votes.count(index) for index in range(width)]
+            common = dict(id=row["id"], task="human_labels", split="test", source=str(file_path), label=max(range(width), key=counts.__getitem__))
+            if shape == "pair":
+                samples.append(TextPairDistributionSample(text_a=row["text_a"], text_b=row["text_b"], human_dist=[count / len(votes) for count in counts], annotation_labels=votes, **common))
+            else:
+                samples.append(SingleTextDistributionSample(text=row["text"], human_dist=[count / len(votes) for count in counts], annotation_labels=votes, **common))
+        return samples
+
+    if prediction_kind == "multilabel":
+        votes_by_row = []
+        for index, row in enumerate(records, 1):
+            votes = row.get("annotation_label_sets")
+            valid = isinstance(votes, list) and bool(votes) and all(isinstance(vote, list) and all(isinstance(label, int) and not isinstance(label, bool) and label >= 0 for label in vote) for vote in votes)
+            if not valid:
+                raise ValueError(f"Record {index} in {file_path} must contain annotation_label_sets for multilabel evaluation.")
+            votes_by_row.append(votes)
+        width = max((label for votes in votes_by_row for vote in votes for label in vote), default=-1) + 1
+        if width < 2:
+            raise ValueError(f"{file_path} multilabel annotations must cover at least two labels.")
+        return [SingleTextMultilabelDistributionSample(
+            id=row["id"], task="human_labels", split="test", source=str(file_path), text=row["text"],
+            labels=[int(sum(label in vote for vote in votes) / len(votes) >= 0.5) for label in range(width)],
+            human_probs=[sum(label in vote for vote in votes) / len(votes) for label in range(width)], annotation_label_sets=votes,
+        ) for row, votes in zip(records, votes_by_row)]
+
+    if prediction_kind == "multilevel":
+        annotations = []
+        for index, row in enumerate(records, 1):
+            value = row.get("annotation_labels")
+            if not isinstance(value, dict) or not value or any(not isinstance(level, str) or not isinstance(votes, list) or not votes or any(isinstance(v, bool) or not isinstance(v, int) or v < 0 for v in votes) for level, votes in value.items()):
+                raise ValueError(f"Record {index} in {file_path} must contain a non-empty dimension-to-votes annotation_labels object for multilevel evaluation.")
+            annotations.append(value)
+        levels = tuple(annotations[0])
+        if any(tuple(value) != levels for value in annotations):
+            raise ValueError(f"{file_path} multilevel records must use the same ordered dimensions.")
+        widths = {level: max(max(value[level]) for value in annotations) + 1 for level in levels}
+        samples = []
+        for row, value in zip(records, annotations):
+            distributions = {level: [value[level].count(index) / len(value[level]) for index in range(widths[level])] for level in levels}
+            hard = {level: max(range(widths[level]), key=lambda index, level=level: distributions[level][index]) for level in levels}
+            common = dict(id=row["id"], task="human_labels", split="test", source=str(file_path), hard_labels=hard, human_dists=distributions, annotation_labels=value)
+            if shape == "pair":
+                samples.append(MultilevelSample(text_a=row["text_a"], text_b=row["text_b"], **common))
+            else:
+                samples.append(SingleTextMultilevelSample(text=row["text"], **common))
+        return samples
+    raise ValueError(f"Unsupported prediction contract: {prediction_kind!r}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate HLV predictions")
+    parser.add_argument("--config", nargs="+", action="extend", default=[], metavar="PATH", help="JSON configs merged left to right; CLI values override them.")
     
     parser.add_argument(
         "--predictions",
         type=str,
-        required=True,
-        help="Path to predictions JSON file",
+        default=None,
+        help="Path to predictions JSON file (config or CLI).",
     )
 
     parser.add_argument(
-        "--predictions_format",
-        type=str,
-        default="json",
-        choices=["json"],
+        "--predictions_format", type=str, default="json", choices=["json"],
         help="Predictions file format (default: json)",
     )
+    parser.add_argument("--metrics", nargs="+", default=None, help="Optional metric names to retain in results.")
     
     
-    parser.add_argument(
-        "--ground_truth_split",
-        type=str,
-        default="test",
-        choices=["train", "dev", "test"],
-        help="Split of ground truth data",
-    )
-    
-    ground_truth_input = parser.add_mutually_exclusive_group(required=True)
-    ground_truth_input.add_argument(
-        "--data_dir",
-        type=str,
-        help="Processed dataset directory containing dataset.json",
-    )
-    ground_truth_input.add_argument(
-        "--ground_truth",
-        type=str,
-        help="Lightweight external ground-truth JSON file",
-    )
+    parser.add_argument("--input_file", type=str, default=None, help="Input JSON aligned with predictions; may be the same file as --human_labels.")
+    parser.add_argument("--human_labels", type=str, default=None, help="Test JSON containing human annotation labels or distributions.")
 
     parser.add_argument(
         "--output_file",
@@ -202,28 +309,28 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "--plot",
+        "--ternary-plot",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Whether to save plots (default: enabled)",
+        default=False,
+        help="Write ternary PNG diagnostics for three-class soft-label data (default: disabled)",
     )
 
     parser.add_argument(
-        "--plot_dir",
+        "--ternary-plot-dir",
         type=str,
         default=None,
-        help="Directory to save plots (default: outputs/<ground_truth_source>/figures)",
+        help="Directory to save ternary diagnostics (default: outputs/<ground_truth_source>/figures)",
     )
 
     parser.add_argument(
-        "--plot_title",
+        "--ternary-plot-title",
         type=str,
         default=None,
-        help="Optional title for the plot (default: predictions file stem)",
+        help="Optional ternary-plot title (default: predictions file stem)",
     )
 
     parser.add_argument(
-        "--ternary_source",
+        "--ternary-source",
         type=str,
         default="both",
         choices=["model", "human", "both"],
@@ -231,10 +338,10 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "--ternary_browser",
+        "--ternary-browser",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Whether to also save an interactive browser ternary plot as HTML (default: enabled).",
+        help="With --ternary-plot, also write an interactive HTML ternary plot (default: enabled).",
     )
 
     parser.add_argument(
@@ -268,7 +375,17 @@ def main() -> None:
         help="CSV path for per-instance errors (default: next to aggregate analysis).",
     )
     
-    args = parser.parse_args()
+    bootstrap_parser = argparse.ArgumentParser(add_help=False)
+    bootstrap_parser.add_argument("--config", nargs="+", action="extend", default=[])
+    bootstrap_args, _ = bootstrap_parser.parse_known_args()
+    config_values = _load_merged_json_configs(bootstrap_args.config)
+    args = parser.parse_args(namespace=argparse.Namespace(**config_values))
+    if not args.predictions:
+        parser.error("--predictions is required (in --config or on the command line).")
+    if not args.input_file:
+        parser.error("--input_file is required (in --config or on the command line).")
+    if not args.human_labels:
+        parser.error("--human_labels is required (in --config or on the command line).")
     
     # Load predictions
     print(f"Loading predictions from {args.predictions}...")
@@ -277,27 +394,17 @@ def main() -> None:
         predictions_format=args.predictions_format,
     )
     print(f"Loaded {len(predictions)} predictions")
+    prediction_kind = _infer_prediction_kind(predictions)
+    print(f"Inferred prediction contract: {prediction_kind}")
     
-    multilevel_eval = False
-    if args.ground_truth:
-        ground_truth = load_ground_truth(Path(args.ground_truth))
-    else:
-        manifest = json.loads((Path(args.data_dir) / "dataset.json").read_text(encoding="utf-8"))
-        data_format = manifest.get("format")
-        if data_format == "text_pair_label_distribution":
-            ground_truth = TextPairClassificationJSONReader(args.data_dir).load_split(args.ground_truth_split)
-        elif data_format == "single_text_label_distribution":
-            ground_truth = SingleTextClassificationJSONReader(args.data_dir).load_split(args.ground_truth_split)
-        elif data_format == "single_text_multilabel_annotation_distribution":
-            ground_truth = SingleTextMultilabelJSONReader(args.data_dir).load_split(args.ground_truth_split)
-        elif data_format == "text_pair_multidimensional_label_distribution":
-            ground_truth = TextPairMultilevelJSONReader(args.data_dir).load_split(args.ground_truth_split)
-            multilevel_eval = True
-        elif data_format == "single_text_multidimensional_label_distribution":
-            ground_truth = SingleTextMultilevelJSONReader(args.data_dir).load_split(args.ground_truth_split)
-            multilevel_eval = True
-        else:
-            raise ValueError(f"Unsupported evaluation format: {data_format!r}")
+    from hlv_toolkits.scripts.predict import _load_inputs
+    _, input_samples = _load_inputs(Path(args.input_file))
+    input_ids = {sample["id"] for sample in input_samples}
+    prediction_ids = {prediction.id for prediction in predictions}
+    if input_ids != prediction_ids:
+        raise ValueError("input_file IDs must exactly match prediction IDs.")
+    multilevel_eval = prediction_kind == "multilevel"
+    ground_truth = load_human_labels(Path(args.human_labels), prediction_kind)
 
     print(f"Loaded {len(ground_truth)} ground truth samples")
 
@@ -350,6 +457,8 @@ def main() -> None:
         else:
             valid = 0 if eval_output.pred_labels is None else len(eval_output.pred_labels)
         print(f"Valid pairs used for metrics: {valid}/{len(predictions)}")
+
+    results = _filter_metrics(results, args.metrics)
 
     analysis_payload = None
     instance_records: List[Dict[str, object]] = []
@@ -440,9 +549,9 @@ def main() -> None:
         print(f"Per-instance errors saved to {errors_path}")
 
     # Ternary diagnostics are optional and apply only to three-class soft-label data.
-    if args.plot and eval_output is not None and eval_output.pred_probs is not None and eval_output.pred_probs.shape[1] == 3:
-        plot_dir = Path(args.plot_dir) if args.plot_dir else Path("outputs/evaluation/figures")
-        title = args.plot_title or Path(args.predictions).stem
+    if args.ternary_plot and eval_output is not None and eval_output.pred_probs is not None and eval_output.pred_probs.shape[1] == 3:
+        plot_dir = Path(args.ternary_plot_dir) if args.ternary_plot_dir else Path("outputs/evaluation/figures")
+        title = args.ternary_plot_title or Path(args.predictions).stem
         stem = Path(args.predictions).stem
         save_distribution_ternary_plot(
             model_distributions=eval_output.pred_probs,

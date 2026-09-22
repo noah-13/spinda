@@ -1,4 +1,6 @@
 import json
+
+import pytest
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -79,3 +81,61 @@ def test_prediction_json_schemas_and_dimension_evaluation(tmp_path):
     assert set(categorical[0]) == {"probs", "pred"}
     assert multilabel[0]["pred"] == [1, 0]
     assert set(dimensions[0]) == {"dimensions"}
+
+
+
+def test_prediction_input_file_infers_text_pair_shape(tmp_path):
+    input_path = tmp_path / "external_examples.json"
+    _write(
+        input_path,
+        [{
+            "id": "external-1",
+            "text_a": "A dog is running.",
+            "text_b": "An animal is moving.",
+            "annotation_labels": [0, 1],
+        }],
+    )
+
+    from hlv_toolkits.scripts.predict import _load_inputs
+
+    input_shape, samples = _load_inputs(input_path)
+
+    assert input_shape == "text_pair"
+    assert samples == [{
+        "id": "external-1",
+        "text_a": "A dog is running.",
+        "text_b": "An animal is moving.",
+    }]
+
+
+def test_prediction_configs_merge_left_to_right(tmp_path):
+    defaults = tmp_path / "defaults.json"
+    run_config = tmp_path / "run.json"
+    _write(defaults, {"batch_size": 16, "device": "cpu"})
+    _write(
+        run_config,
+        {
+            "model_path": "outputs/model/final_model",
+            "input_file": "external.json",
+            "batch_size": 64,
+        },
+    )
+
+    from hlv_toolkits.scripts.predict import _load_merged_json_configs
+
+    assert _load_merged_json_configs([str(defaults), str(run_config)]) == {
+        "device": "cpu",
+        "model_path": "outputs/model/final_model",
+        "input_file": "external.json",
+        "batch_size": 64,
+    }
+
+
+def test_prediction_config_rejects_training_metadata(tmp_path):
+    config_path = tmp_path / "training.json"
+    _write(config_path, {"format": "text_pair_label_distribution", "labels": ["no", "yes"]})
+
+    from hlv_toolkits.scripts.predict import _load_json_config
+
+    with pytest.raises(ValueError, match="Unknown prediction config keys.*format.*labels"):
+        _load_json_config(str(config_path))

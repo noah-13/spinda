@@ -30,8 +30,8 @@ Git-ignored.
 | --- | --- | --- |
 | ChaosNLI (SNLI and MNLI-M) | `bash scripts/chaosnli.sh` | [Nie, Zhou, and Bansal (2020)](https://aclanthology.org/2020.emnlp-main.734/) |
 | MD-Agreement | `bash scripts/md_agreement.sh` | [Leonardelli et al. (2021)](https://aclanthology.org/2021.emnlp-main.822/) |
-| MultiPICo (English / multilingual) | `bash scripts/multipico/english.sh` / `bash scripts/multipico/multilingual.sh` | [Casola et al. (2024)](https://aclanthology.org/2024.acl-long.849/) |
-| DiscoGeM 2.0 (English / multilingual / joint) | `bash scripts/discogem/english.sh` / `multilingual.sh` / `multilevel.sh` | [Yung et al. (2024)](https://aclanthology.org/2024.lrec-main.443/) |
+| MultiPICo (English / multilingual) | `bash scripts/multipico.sh` | [Casola et al. (2024)](https://aclanthology.org/2024.acl-long.849/) |
+| DiscoGeM 2.0 (English / multilingual / separate / joint) | `bash scripts/discogem.sh` | [Yung et al. (2024)](https://aclanthology.org/2024.lrec-main.443/) |
 | TGeGUM / Humans-and-Domains | `bash scripts/humans_and_domains.sh` | [Barrett et al. (2024)](https://aclanthology.org/2024.lrec-main.245/) |
 | MFRC multi-label | `bash scripts/mfrc.sh` | [Trager et al. (2026)](https://aclanthology.org/2026.lrec-1.507/) |
 
@@ -50,8 +50,25 @@ The original MFRC paper reports 16,123 English Reddit comments, each annotated
 by at least three annotators. Treat those as the source-paper statistics; do
 not substitute the processed-release counts when describing the original corpus.
 
-Use `LEVEL=level1` (or `level2`, `level3`) to restrict a DiscoGeM run.
-The launcher defaults retain the paper's English-only versus multilingual model pools.
+`scripts/multipico.sh` defaults to both the English and multilingual settings.
+Set `VARIANTS=english` or `VARIANTS=multilingual` to run one setting only.
+
+`scripts/discogem.sh` defaults to both language settings, all three separate
+levels, and joint multilevel training. Set `VARIANTS=english` (or
+`multilingual`) to limit language scope; set `MODES=separate` or `MODES=joint`
+to choose the implementation. `LEVEL=level1` (or `level2`, `level3`) further
+limits a separate-only run, for example:
+
+```bash
+VARIANTS=english MODES=separate LEVEL=level1 bash scripts/discogem.sh
+```
+
+The defaults cover every training setting reported in the paper: ChaosNLI-S/M,
+MD-Agreement, MultiPICo English/multilingual, DiscoGeM English/multilingual
+separate and joint, TGeGUM separate and joint, and MFRC. They prepare data and
+train the paper model/strategy/seed matrix. They do not automatically recreate
+the paper's aggregated tables and figures; run prediction, evaluation, and
+analysis over the completed checkpoints to produce those artifacts.
 
 ## Independent prediction, evaluation, and analysis
 
@@ -61,7 +78,8 @@ follows [the prediction JSON contract](prediction_contract.md).
 ```bash
 uv run python -m hlv_toolkits.scripts.evaluate \
   --predictions outputs/example/predictions.json \
-  --data_dir data/datasets/text_pair/chaosnli/snli/0 --analysis --no-plot
+  --input_file data/datasets/text_pair/chaosnli/snli/0/test.json \
+  --human_labels data/datasets/text_pair/chaosnli/snli/0/test.json --analysis
 ```
 
 This writes distribution-aware metrics, entropy-stratified disagreement metrics,
