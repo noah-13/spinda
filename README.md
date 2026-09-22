@@ -11,8 +11,16 @@ multi-dimensional annotations.
 
 ## Install
 
+Using [uv](https://docs.astral.sh/uv/) (recommended):
+
 ```bash
 uv sync
+```
+
+Or install the repository as an editable package with pip:
+
+```bash
+pip install -e .
 ```
 
 Run commands from the repository root:

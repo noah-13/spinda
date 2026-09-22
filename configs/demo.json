@@ -5,7 +5,7 @@
   "train_path": "data/datasets/text_pair/chaosnli/mnli_m/0/train.json",
   "dev_path": "data/datasets/text_pair/chaosnli/mnli_m/0/dev.json",
   "model": "prajjwal1/bert-tiny",
-  "device": "auto",
+  "device": "cuda:0",
   "output_dir": "outputs/demo",
   "num_epochs": 1,
   "learning_rate": 5e-5,
