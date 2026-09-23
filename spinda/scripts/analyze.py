@@ -57,8 +57,8 @@ def _save_disagreement_metric(
     figure, axis = plt.subplots(figsize=(5.2, 3.1))
     x = np.arange(len(groups), dtype=float)
     for index, (label, series) in enumerate(values.items()):
-        means = np.asarray([np.mean(series[group]) for group in groups], dtype=float)
-        deviations = np.asarray([np.std(series[group], ddof=0) for group in groups], dtype=float)
+        means = np.asarray([np.mean(series[group]) if series[group] else np.nan for group in groups], dtype=float)
+        deviations = np.asarray([np.std(series[group], ddof=0) if series[group] else np.nan for group in groups], dtype=float)
         axis.errorbar(x, means, yerr=deviations, marker="o", capsize=3, linewidth=1.8, label=label, color=STRATEGY_COLORS[index % len(STRATEGY_COLORS)])
     axis.set_xticks(x, tuple(group.replace("_", " ").title() for group in groups))
     axis.set_xlabel("Human disagreement group")
@@ -181,8 +181,14 @@ def main() -> None:
     by_label_group: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     by_label_errors: dict[str, list[float]] = defaultdict(list)
     group_names: tuple[str, ...] | None = None
+    grouping = None
     for analysis_path, errors_path, label in artifact_pairs:
         report = _read_analysis(analysis_path, args.level)
+        current_grouping = (report.get("stratification"), report.get("entropy_unit"), report.get("thresholds"))
+        if grouping is None:
+            grouping = current_grouping
+        elif grouping != current_grouping:
+            raise ValueError("All analysis artifacts must use the same disagreement grouping and boundaries.")
         groups = report.get("groups", {})
         current_group_names = tuple(groups)
         if not current_group_names:
@@ -191,7 +197,10 @@ def main() -> None:
             group_names = current_group_names
         elif current_group_names != group_names:
             raise ValueError("All analysis artifacts must use the same disagreement grouping.")
-        for group in current_group_names:
+        for group in current_group_names if "stratified" in args.plots else ():
+            if groups[group].get("n") == 0:
+                by_label_group[label][group]
+                continue
             metrics = groups[group].get("metrics")
             if not metrics or args.metric not in metrics:
                 raise ValueError(f"{analysis_path} has no {args.metric} result for the {group} group.")

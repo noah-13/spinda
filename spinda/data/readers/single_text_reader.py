@@ -7,7 +7,7 @@ from typing import List, Literal, Optional, Sequence
 
 from spinda.data.readers.base import BaseReader
 from spinda.data.json_io import load_records, split_path
-from spinda.data.tie_breaking import tied_argmax
+from spinda.data.tie_breaking import annotation_argmax
 from spinda.data.schemas import SingleTextClassificationSample, SingleTextDistributionSample, Split
 
 SINGLE_TEXT_TASK = "single_text_label_distribution"
@@ -71,7 +71,7 @@ class SingleTextClassificationJSONReader(BaseReader):
                 raise ValueError("label_mode='hard' requires exactly one annotation label per example.")
             seen.add(identifier)
             counts = [votes.count(i) for i in range(len(self.labels))]
-            label = tied_argmax(counts, identifier, SINGLE_TEXT_TASK)
+            label = annotation_argmax(counts, row, SINGLE_TEXT_TASK)
             common = dict(id=identifier, task=self.task, split=name, source=self.source, text=text, label=label)
             if self.label_mode in {"soft", "soft_to_hard"}:
                 samples.append(SingleTextDistributionSample(human_dist=[count / len(votes) for count in counts], annotation_labels=list(votes), **common))

@@ -7,7 +7,7 @@ from typing import List
 from spinda.data.readers.multilevel_reader import TextPairMultilevelJSONReader
 from spinda.data.json_io import load_records, split_path
 from spinda.data.schemas import SingleTextMultilevelSample, Split
-from spinda.data.tie_breaking import tied_argmax
+from spinda.data.tie_breaking import annotation_argmax
 
 
 class SingleTextMultilevelJSONReader(TextPairMultilevelJSONReader):
@@ -45,7 +45,7 @@ class SingleTextMultilevelJSONReader(TextPairMultilevelJSONReader):
                 SingleTextMultilevelSample(
                     id=sample_id, task=payload.get("task", self.task), split=target,
                     source=payload.get("source"), meta=dict(payload.get("meta") or {}), text=text,
-                    hard_labels={level: tied_argmax(human_dists[level], sample_id, f"{self.task}:{level}") for level in self.dimension_names},
+                    hard_labels={level: annotation_argmax(human_dists[level], payload, f"{self.task}:{level}", level) for level in self.dimension_names},
                     human_dists=human_dists,
                     annotation_labels=votes,
                 )

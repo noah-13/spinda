@@ -46,15 +46,19 @@ def prepare_mfrc(rows: Iterable[dict[str, Any]], output_dir: Path) -> dict[str, 
     manifest = {
         "format": "single_text_multilabel_annotation_distribution",
         "labels": MFRC_LABELS,
+        "label_mode": "soft",
         "train_path": str(output_dir / "train.json"),
         "dev_path": str(output_dir / "dev.json"),
+    }
+    (output_dir / "dataset.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    provenance = {
         "source": {
             "dataset": MFRC_DATASET_ID,
             "split": MFRC_DATASET_SPLIT,
             "aggregation": "one grouped item per (text, subreddit, bucket); source rows retain individual annotations",
         },
     }
-    (output_dir / "dataset.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    (output_dir / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
     records = {split: [] for split in ("train", "dev", "test")}
     for ordinal, ((text, subreddit, bucket), annotations) in enumerate(grouped.items()):
         split = _split_for("\u241f".join((text, subreddit, bucket)))

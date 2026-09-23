@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "spinda"
+name = "spinda-hlv"
 version = "0.1.0"
 description = "SPInDa: Simple Prediction and Interpretation of Data with Human Label Variation"
 readme = "README.md"

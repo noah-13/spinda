@@ -1,0 +1,6 @@
+include .python-version uv.lock
+recursive-include configs *.json
+recursive-include scripts *.sh
+recursive-include docs *.md *.png
+include data/README.md
+recursive-include notebooks *.ipynb

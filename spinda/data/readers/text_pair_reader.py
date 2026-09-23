@@ -8,7 +8,7 @@ from typing import Any, Iterator, List, Literal, Optional, Sequence
 
 from spinda.data.readers.base import BaseReader
 from spinda.data.json_io import load_records, split_path
-from spinda.data.tie_breaking import tied_argmax
+from spinda.data.tie_breaking import tied_argmax, annotation_argmax
 from spinda.data.schemas import Split, TextPairClassificationSample, TextPairDistributionSample
 
 TEXT_PAIR_TASK = "text_pair_label_distribution"
@@ -147,7 +147,7 @@ class TextPairClassificationJSONReader(BaseReader):
             counts = [0] * num_labels
             for label in annotations:
                 counts[label] += 1
-            record["label"] = tied_argmax(counts, str(record.get("id", "")), TEXT_PAIR_TASK)
+            record["label"] = annotation_argmax(counts, record, TEXT_PAIR_TASK)
             record["label_distribution"] = [count / len(annotations) for count in counts]
             yield line_number, record
 
@@ -255,7 +255,7 @@ class TextPairClassificationJSONReader(BaseReader):
             seen_ids.add(record["id"])
             common = dict(
                 id=record["id"], task=TEXT_PAIR_TASK, split=normalized_split,
-                source=self.source, text_a=record["text_a"], text_b=record["text_b"], meta={},
+                source=self.source, text_a=record["text_a"], text_b=record["text_b"], meta=dict(record.get("meta") or {}),
             )
             if self.source_label_mode == "soft":
                 dist = record["label_distribution"]
@@ -271,7 +271,7 @@ class TextPairClassificationJSONReader(BaseReader):
                 dist = [float(x) for x in dist]
                 if abs(sum(dist) - 1.0) > 1e-6:
                     raise ValueError(f"Line {line_number} in {path} label_distribution must sum to 1.")
-                hard_label = self._hard_label_from_distribution(dist, record["id"], True)
+                hard_label = record["label"]
                 samples.append(TextPairDistributionSample(label=hard_label, human_dist=dist, annotation_labels=list(record["annotation_labels"]), **common))
             else:
                 label = record["label"]

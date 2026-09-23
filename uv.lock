@@ -4144,7 +4144,7 @@ wheels = [
 ]
 
 [[package]]
-name = "spinda"
+name = "spinda-hlv"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

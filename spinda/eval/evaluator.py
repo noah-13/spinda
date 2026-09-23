@@ -16,6 +16,7 @@ from spinda.data.schemas import (
 )
 from spinda.eval.metrics import (
     compute_tvd,
+    validate_and_fix_probs,
     compute_distance_correlation,
     compute_entropy_correlation,
     compute_euclidean_distance,
@@ -56,6 +57,7 @@ _CATEGORICAL_DISTRIBUTION_METRICS = frozenset(
     {
         *DEFAULT_CATEGORICAL_DISTRIBUTION_METRICS,
         # Backward-compatible, mathematically derived metrics; opt-in only.
+        "macro_f1",
         "l1",
         "pojsd",
         "soft_micro_f1",
@@ -63,6 +65,15 @@ _CATEGORICAL_DISTRIBUTION_METRICS = frozenset(
         "soft_macro_f1",
     }
 )
+
+
+def _macro_f1(predicted, targets, num_labels):
+    scores = []
+    for label in range(num_labels):
+        pred, gold = predicted == label, targets == label
+        denominator = pred.sum() + gold.sum()
+        scores.append(float(2 * np.logical_and(pred, gold).sum() / denominator) if denominator else 0.0)
+    return float(np.mean(scores))
 
 
 class Evaluator:
@@ -164,6 +175,8 @@ class Evaluator:
 
         pred_probs = np.array(pred_probs_list, dtype=float)
         human_probs = np.array(human_probs_list, dtype=float)
+        pred_probs = validate_and_fix_probs(pred_probs, name="pred_probs")
+        human_probs = validate_and_fix_probs(human_probs, name="human_probs")
         pred_labels_arr = np.array(pred_labels, dtype=int)
         true_labels_arr = np.array(true_labels, dtype=int)
         return pred_probs, human_probs, pred_labels_arr, true_labels_arr
@@ -211,7 +224,7 @@ class Evaluator:
         accuracy = (pred_labels_arr == true_labels_arr).mean()
 
         return EvaluationArtifacts(
-            metrics={"accuracy": float(accuracy)},
+            metrics={"accuracy": float(accuracy), "macro_f1": _macro_f1(pred_labels_arr, true_labels_arr, len(predictions[0].outputs["probs"]))},
             pred_labels=pred_labels_arr,
             true_labels=true_labels_arr,
         )
@@ -228,36 +241,23 @@ class Evaluator:
         if len(pred_probs) == 0:
             raise ValueError("No valid predictions to evaluate.")
 
-        accuracy = (pred_labels == true_labels).mean()
-        tvd = compute_tvd(pred_probs, human_probs)
-        jsd = compute_jsd(pred_probs, human_probs, base=2)
-        pojsd = compute_pojsd(pred_probs, human_probs)
-        kl = compute_kl(human_probs, pred_probs)
-        soft_micro_f1 = compute_soft_micro_f1(pred_probs, human_probs)
-        soft_macro_f1 = compute_soft_macro_f1(pred_probs, human_probs)
-        distance_correlation = compute_distance_correlation(pred_probs, human_probs)
-        entropy_correlation = compute_entropy_correlation(pred_probs, human_probs)
-        euclidean_distance = compute_euclidean_distance(pred_probs, human_probs)
-        cross_entropy = compute_cross_entropy(human_probs, pred_probs)
-
-        all_metrics = {
-                "accuracy": float(accuracy),
-                "tvd": float(np.mean(tvd)),
-                # Manhattan/L1 is exactly 2 * TVD for categorical distributions.
-                "l1": float(2.0 * np.mean(tvd)),
-                "jsd": float(np.mean(jsd)),
-                "pojsd": float(np.mean(pojsd)),
-                "kl": float(np.mean(kl)),
-                "soft_micro_f1": float(soft_micro_f1),
-                # For normalized categorical distributions this equals 1 - TVD.
-                "soft_accuracy": float(soft_micro_f1),
-                "soft_macro_f1": float(soft_macro_f1),
-                "distance_correlation": float(distance_correlation),
-                "entropy_correlation": float(entropy_correlation),
-                # Keep result keys aligned with notebooks/metrics_tutorial.ipynb.
-                "l2": float(np.mean(euclidean_distance)),
-                "ce": float(np.mean(cross_entropy)),
+        functions = {
+            "accuracy": lambda: float((pred_labels == true_labels).mean()),
+            "macro_f1": lambda: _macro_f1(pred_labels, true_labels, pred_probs.shape[1]),
+            "tvd": lambda: float(np.mean(compute_tvd(pred_probs, human_probs))),
+            "l1": lambda: 2 * float(np.mean(compute_tvd(pred_probs, human_probs))),
+            "jsd": lambda: float(np.mean(compute_jsd(pred_probs, human_probs, base=2))),
+            "pojsd": lambda: float(np.mean(compute_pojsd(pred_probs, human_probs))),
+            "kl": lambda: float(np.mean(compute_kl(human_probs, pred_probs))),
+            "soft_micro_f1": lambda: float(compute_soft_micro_f1(pred_probs, human_probs)),
+            "soft_accuracy": lambda: float(compute_soft_micro_f1(pred_probs, human_probs)),
+            "soft_macro_f1": lambda: float(compute_soft_macro_f1(pred_probs, human_probs)),
+            "distance_correlation": lambda: compute_distance_correlation(pred_probs, human_probs),
+            "entropy_correlation": lambda: compute_entropy_correlation(pred_probs, human_probs),
+            "l2": lambda: float(np.mean(compute_euclidean_distance(pred_probs, human_probs))),
+            "ce": lambda: float(np.mean(compute_cross_entropy(human_probs, pred_probs))),
         }
+        all_metrics = {name: functions[name]() for name in self.distribution_metrics}
 
         return EvaluationArtifacts(
             metrics={name: all_metrics[name] for name in self.distribution_metrics},

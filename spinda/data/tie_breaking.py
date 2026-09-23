@@ -21,3 +21,11 @@ def binary_threshold(value: float, identifier: str, namespace: str = "") -> int:
     if value != 0.5:
         return int(value > 0.5)
     return tied_argmax([0.5, 0.5], identifier, namespace)
+
+
+def annotation_argmax(values, row, namespace, dimension=None):
+    """Project votes using the same identity across readers and evaluation."""
+    identity = (row.get("meta") or {}).get("label_identity", {})
+    if dimension is not None:
+        identity = identity.get(dimension, {})
+    return tied_argmax(values, str(identity.get("id", row["id"])), identity.get("namespace", namespace))

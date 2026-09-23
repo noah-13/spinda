@@ -180,10 +180,10 @@ def main() -> None:
     )
     parser.add_argument("--model_path", default=None, help="Path to trained model directory.")
     parser.add_argument("--input_file", default=None, help="JSON array of unlabeled examples to predict.")
-    parser.add_argument("--output_file", default="predictions.json", help="Output JSON array path.")
+    parser.add_argument("--output_file", default="predictions.json", help="Output JSON object path (containing a predictions array).")
     parser.add_argument("--batch_size", type=int, default=32, help="Inference batch size.")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu", help="Inference device: auto, cpu, cuda, or cuda:<index>.")
-    parser.add_argument("--max_length", type=int, default=0, help="Tokenized maximum length; 0 uses the model limit.")
+    parser.add_argument("--max_length", type=int, default=None, help="Tokenized maximum length; defaults to the saved training length, 0 uses the model limit.")
 
     bootstrap_parser = argparse.ArgumentParser(add_help=False)
     bootstrap_parser.add_argument("--config", nargs="+", action="extend", default=[])
@@ -197,7 +197,7 @@ def main() -> None:
 
     output_path = Path(args.output_file)
     if output_path.suffix != ".json":
-        parser.error("--output_file must end in .json; prediction output uses a top-level JSON array.")
+        parser.error("--output_file must end in .json; prediction output is a JSON object containing a predictions array.")
     if args.device == "auto":
         args.device = "cuda:0" if torch.cuda.is_available() else "cpu"
     elif args.device == "cuda":
@@ -209,6 +209,11 @@ def main() -> None:
     model_path = Path(args.model_path)
     if not model_path.exists():
         raise FileNotFoundError(f"Model path not found: {args.model_path}")
+
+    if args.max_length is None:
+        training_config_path = model_path / "training_config.json"
+        saved_config = json.loads(training_config_path.read_text()) if training_config_path.is_file() else {}
+        args.max_length = saved_config.get("max_length", 0)
 
     trainer = HLVTrainer(TrainingConfig(model_name_or_path=str(model_path)))
     trainer.load_model(str(model_path))

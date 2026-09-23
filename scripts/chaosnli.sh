@@ -18,7 +18,9 @@ SUBSETS="${SUBSETS:-snli mnli_m}"
 EVALUATE="${EVALUATE:-1}"
 FORCE_EVAL="${FORCE_EVAL:-0}"
 PREDICT_BATCH_SIZE="${PREDICT_BATCH_SIZE:-32}"
-PREDICT_MAX_LENGTH="${PREDICT_MAX_LENGTH:-0}"
+PREDICT_MAX_LENGTH="${PREDICT_MAX_LENGTH:-}"
+declare -a PREDICT_LENGTH_ARGS=()
+[[ -z "$PREDICT_MAX_LENGTH" ]] || PREDICT_LENGTH_ARGS=(--max_length "$PREDICT_MAX_LENGTH")
 export CUDA_VISIBLE_DEVICES="${GPU:-0}"
 
 evaluate_completed_runs() {
@@ -49,8 +51,8 @@ raise SystemExit(not required.issubset(metrics))
     if [[ ! -s "$predictions" ]]; then
       echo "Generating test predictions: $seed_dir"
       uv run python -m spinda.scripts.predict \
-        --model_path "$model_dir" --input_file "$dataset_dir/test.json" --config "$dataset_config" \
-        --device cuda:0 --batch_size "$PREDICT_BATCH_SIZE" --max_length "$PREDICT_MAX_LENGTH" \
+        --model_path "$model_dir" --input_file "$dataset_dir/test.json" \
+        --device cuda:0 --batch_size "$PREDICT_BATCH_SIZE" "${PREDICT_LENGTH_ARGS[@]}" \
         --output_file "$predictions"
     else
       echo "Reusing test predictions: $predictions"

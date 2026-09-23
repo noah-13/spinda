@@ -1,9 +1,13 @@
 {
   "soft_label_metric_for_best_model": "tvd",
   "num_epochs": 20,
-  "learning_rate": 2e-5,
+  "learning_rate": 2e-05,
   "train_batch_size": 32,
   "eval_batch_size": 64,
   "max_length": 128,
-  "seeds": [42]
+  "seeds": [
+    42,
+    43,
+    44
+  ]
 }

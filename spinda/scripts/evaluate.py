@@ -35,6 +35,7 @@ from spinda.visualization import (
     save_interactive_distribution_ternary_plot,
 )
 from spinda.data.json_io import load_records
+from spinda.data.tie_breaking import annotation_argmax, binary_threshold
 
 
 MultilevelGroundTruthSample = Union[MultilevelSample, SingleTextMultilevelSample]
@@ -192,7 +193,7 @@ def load_predictions(
 
 
 def load_human_labels(
-    file_path: Path, prediction_kind: str,
+    file_path: Path, prediction_kind: str, predictions: Optional[Sequence[PredictionRecord]] = None,
 ) -> list[Union[TextPairClassificationSample, TextPairDistributionSample, SingleTextClassificationSample, SingleTextDistributionSample, SingleTextMultilabelDistributionSample, MultilevelSample, SingleTextMultilevelSample]]:
     """Load a test JSON that contains human annotations, inferring its supported contract."""
     rows = list(load_records(file_path, kind="human-label test records"))
@@ -218,6 +219,23 @@ def load_human_labels(
         raise ValueError(f"{file_path} mixes text-pair and single-text records.")
     shape = shapes.pop()
 
+    def width_for(observed: int, dimension: Optional[str] = None) -> int:
+        if predictions is None:
+            return observed
+        widths = set()
+        for prediction in predictions:
+            output = (_get_multilevel_prediction_payload(prediction, dimension)
+                      if dimension is not None else prediction.outputs)
+            if not isinstance(output, dict) or not isinstance(output.get("probs"), list):
+                raise ValueError(f"Prediction {prediction.id} requires a probability vector.")
+            widths.add(len(output["probs"]))
+        if len(widths) != 1:
+            raise ValueError("Predictions must have consistent probability vector widths.")
+        width = widths.pop()
+        if width < 2 or observed > width:
+            raise ValueError("Annotation index exceeds the prediction label space, or label space is empty.")
+        return width
+
     if prediction_kind == "categorical":
         votes_by_row: list[list[int]] = []
         for index, row in enumerate(records, 1):
@@ -225,11 +243,11 @@ def load_human_labels(
             if not isinstance(votes, list) or not votes or any(isinstance(v, bool) or not isinstance(v, int) or v < 0 for v in votes):
                 raise ValueError(f"Record {index} in {file_path} must contain non-empty integer annotation_labels for categorical evaluation.")
             votes_by_row.append(votes)
-        width = max(max(votes) for votes in votes_by_row) + 1
+        width = width_for(max(max(votes) for votes in votes_by_row) + 1)
         samples = []
         for row, votes in zip(records, votes_by_row):
             counts = [votes.count(index) for index in range(width)]
-            common = dict(id=row["id"], task="human_labels", split="test", source=str(file_path), label=max(range(width), key=counts.__getitem__))
+            common = dict(id=row["id"], task="human_labels", split="test", source=str(file_path), label=annotation_argmax(counts, row, "text_pair_label_distribution" if shape == "pair" else "single_text_label_distribution"))
             if shape == "pair":
                 samples.append(TextPairDistributionSample(text_a=row["text_a"], text_b=row["text_b"], human_dist=[count / len(votes) for count in counts], annotation_labels=votes, **common))
             else:
@@ -244,12 +262,12 @@ def load_human_labels(
             if not valid:
                 raise ValueError(f"Record {index} in {file_path} must contain annotation_label_sets for multilabel evaluation.")
             votes_by_row.append(votes)
-        width = max((label for votes in votes_by_row for vote in votes for label in vote), default=-1) + 1
+        width = width_for(max((label for votes in votes_by_row for vote in votes for label in vote), default=-1) + 1)
         if width < 2:
             raise ValueError(f"{file_path} multilabel annotations must cover at least two labels.")
         return [SingleTextMultilabelDistributionSample(
             id=row["id"], task="human_labels", split="test", source=str(file_path), text=row["text"],
-            labels=[int(sum(label in vote for vote in votes) / len(votes) >= 0.5) for label in range(width)],
+            labels=[binary_threshold(sum(label in vote for vote in votes) / len(votes), row["id"], f"single_text_multilabel_annotation_distribution:label:{label}") for label in range(width)],
             human_probs=[sum(label in vote for vote in votes) / len(votes) for label in range(width)], annotation_label_sets=votes,
         ) for row, votes in zip(records, votes_by_row)]
 
@@ -261,13 +279,18 @@ def load_human_labels(
                 raise ValueError(f"Record {index} in {file_path} must contain a non-empty dimension-to-votes annotation_labels object for multilevel evaluation.")
             annotations.append(value)
         levels = tuple(annotations[0])
-        if any(tuple(value) != levels for value in annotations):
+        if any(set(value) != set(levels) for value in annotations):
             raise ValueError(f"{file_path} multilevel records must use the same ordered dimensions.")
-        widths = {level: max(max(value[level]) for value in annotations) + 1 for level in levels}
+        if predictions is not None:
+            for prediction in predictions:
+                outputs = prediction.outputs.get("dimensions")
+                if not isinstance(outputs, dict) or set(outputs) != set(levels):
+                    raise ValueError("Prediction dimensions must exactly match annotation dimensions.")
+        widths = {level: width_for(max(max(value[level]) for value in annotations) + 1, level) for level in levels}
         samples = []
         for row, value in zip(records, annotations):
             distributions = {level: [value[level].count(index) / len(value[level]) for index in range(widths[level])] for level in levels}
-            hard = {level: max(range(widths[level]), key=lambda index, level=level: distributions[level][index]) for level in levels}
+            hard = {level: annotation_argmax(distributions[level], row, f"multilevel:{level}", level) for level in levels}
             common = dict(id=row["id"], task="human_labels", split="test", source=str(file_path), hard_labels=hard, human_dists=distributions, annotation_labels=value)
             if shape == "pair":
                 samples.append(MultilevelSample(text_a=row["text_a"], text_b=row["text_b"], **common))
@@ -404,7 +427,7 @@ def main() -> None:
     if input_ids != prediction_ids:
         raise ValueError("input_file IDs must exactly match prediction IDs.")
     multilevel_eval = prediction_kind == "multilevel"
-    ground_truth = load_human_labels(Path(args.human_labels), prediction_kind)
+    ground_truth = load_human_labels(Path(args.human_labels), prediction_kind, predictions)
 
     print(f"Loaded {len(ground_truth)} ground truth samples")
 
@@ -412,7 +435,7 @@ def main() -> None:
     print(f"Matched prediction IDs: {len(predictions)}/{len(ground_truth)}")
     
     # Evaluate
-    evaluator = Evaluator()
+    evaluator = Evaluator(distribution_metrics=args.metrics if prediction_kind != "multilabel" else None)
     eval_output = None
     if multilevel_eval:
         print("Computing multilevel metrics...")

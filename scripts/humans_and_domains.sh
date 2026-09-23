@@ -17,7 +17,7 @@ MODEL_SPECS="${MODEL_SPECS:-$PAPER_ENGLISH_MODEL_SPECS}"
 RUN_SPECS="${RUN_SPECS:-soft ce;soft mse;soft jsd;soft rel;soft_to_hard ce}"
 
 dataset_config="$SINGLE_TEXT_ROOT/humans_and_domains/genre/dataset.json"
-if [[ "${FORCE_PREPARE:-0}" == "1" || ! -s "$dataset_config" || ! -s "$SINGLE_TEXT_ROOT/humans_and_domains/genre/train.json" || ! -s "$SINGLE_TEXT_ROOT/humans_and_domains/genre/dev.json" || ! -s "$SINGLE_TEXT_ROOT/humans_and_domains/genre/test.json" ]]; then
+if [[ "${FORCE_PREPARE:-0}" == "1" || ! -s "$SINGLE_TEXT_ROOT/humans_and_domains/multilevel/normalized_topics_v1" || ! -s "$dataset_config" || ! -s "$SINGLE_TEXT_ROOT/humans_and_domains/genre/train.json" || ! -s "$SINGLE_TEXT_ROOT/humans_and_domains/genre/dev.json" || ! -s "$SINGLE_TEXT_ROOT/humans_and_domains/genre/test.json" ]]; then
   uv run python -m spinda.scripts.prepare_humans_and_domains_annotation_labels \
     --input-dir "$INPUT_DIR" \
     --single-text-output-root "$SINGLE_TEXT_ROOT"

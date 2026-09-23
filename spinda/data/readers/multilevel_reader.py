@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, List, Mapping, Optional, Sequence
 from spinda.data.readers.base import BaseReader
 from spinda.data.json_io import load_records, split_path
-from spinda.data.tie_breaking import tied_argmax
+from spinda.data.tie_breaking import annotation_argmax
 from spinda.data.schemas import MultilevelSample, Split
 
 class TextPairMultilevelJSONReader(BaseReader):
@@ -84,7 +84,7 @@ class TextPairMultilevelJSONReader(BaseReader):
                     text_a=str(p.get("text_a", "")),
                     text_b=str(p.get("text_b", "")),
                     hard_labels={
-                        level: tied_argmax(human_dists[level], sample_id, f"{self.task}:{level}")
+                        level: annotation_argmax(human_dists[level], p, f"{self.task}:{level}", level)
                         for level in self.dimension_names
                     },
                     human_dists=human_dists,

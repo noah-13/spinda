@@ -13,6 +13,8 @@ import argparse
 from pathlib import Path
 import json
 import warnings
+import hashlib
+import subprocess
 from typing import Any
 
 import torch
@@ -396,6 +398,23 @@ def main() -> None:
             wandb_job_type=args.wandb_job_type,
             wandb_run_name=wandb_run_name,
         )
+
+        seed_output_dir.mkdir(parents=True, exist_ok=True)
+        run_config = dict(vars(args), seeds=[seed])
+        run_config["data_sha256"] = {
+            name: hashlib.sha256(Path(path).read_bytes()).hexdigest()
+            for name, path in (("train", args.train_path), ("dev", args.dev_path)) if path
+        }
+        try:
+            run_config["code_commit"] = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, text=True
+            ).strip()
+            run_config["code_dirty"] = bool(subprocess.check_output(
+                ["git", "status", "--porcelain"], stderr=subprocess.DEVNULL, text=True
+            ).strip())
+        except (OSError, subprocess.CalledProcessError):
+            run_config["code_commit"] = None
+        (seed_output_dir / "run_config.json").write_text(json.dumps(run_config, indent=2) + "\n", encoding="utf-8")
 
         # Initialize trainer
         trainer = HLVTrainer(config)

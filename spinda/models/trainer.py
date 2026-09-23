@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import inspect
+import math
 import json
 import os
 import time
 from importlib.util import find_spec
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -23,6 +24,7 @@ from transformers import (
     Trainer,
     TrainerCallback,
     TrainingArguments,
+    set_seed,
 )
 from transformers.modeling_outputs import SequenceClassifierOutput
 from transformers.trainer_utils import EvalPrediction
@@ -180,6 +182,7 @@ def _strip_label_inputs(kwargs):
         if key not in {"labels", "hard_labels", "soft_labels"}
         and not key.startswith("hard_labels_")
         and not key.startswith("soft_labels_")
+        and not key.startswith("metric_labels")
     }
 
 
@@ -301,6 +304,9 @@ class TrainingConfig:
             )
             label_names = [f"{prefix}_{level}" for level in MULTILEVEL_LEVEL_ORDER]
 
+        label_names += ([f"metric_labels_{level}" for level in MULTILEVEL_LEVEL_ORDER]
+                        if self.head_type == "multilevel_classification" else ["metric_labels"])
+
         return _build_training_arguments(
             self.device,
             output_dir=self.output_dir,
@@ -331,7 +337,7 @@ class TrainingConfig:
 
 @dataclass
 class MultiLevelSequenceClassifierOutput(ModelOutput):
-    logits: Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]
+    logits: Tuple[torch.FloatTensor, ...]
     hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
     attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
 
@@ -458,11 +464,11 @@ class SoftLabelTrainer(Trainer):
         super()._set_signature_columns_if_needed()
         # Preserve soft reference labels used exclusively by evaluation in
         # soft-to-hard runs; multilevel loss also needs hard label columns.
-        label_columns = ["soft_labels"]
+        label_columns = ["soft_labels", "metric_labels"]
         if self.head_type == "multilevel_classification":
             label_columns.extend(
                 f"{prefix}_{level}"
-                for prefix in ("hard_labels", "soft_labels")
+                for prefix in ("hard_labels", "soft_labels", "metric_labels")
                 for level in MULTILEVEL_LEVEL_ORDER
             )
         self._signature_columns = list(set(self._signature_columns + label_columns))
@@ -472,7 +478,7 @@ class SoftLabelTrainer(Trainer):
         labels = labels / labels.sum(dim=-1, keepdim=True).clamp(min=1e-8)
         if self.soft_label_loss == "mse":
             predictions = F.softmax(logits, dim=-1)
-            return F.mse_loss(predictions, labels)
+            return (predictions - labels).square().sum(dim=-1).mean()
 
         log_probs = F.log_softmax(logits, dim=-1)
         if self.soft_label_loss == "jsd":
@@ -481,7 +487,7 @@ class SoftLabelTrainer(Trainer):
             log_mixture = mixture.clamp(min=1e-8).log()
             kl_labels = (labels * (labels.clamp(min=1e-8).log() - log_mixture)).sum(dim=-1)
             kl_predictions = (predictions * (log_probs - log_mixture)).sum(dim=-1)
-            return 0.5 * (kl_labels + kl_predictions).mean()
+            return 0.5 * (kl_labels + kl_predictions).mean() / math.log(2.0)
         return -(labels * log_probs).sum(dim=-1).mean()
 
     def _labels_for_level(self, inputs, level: str, prefix: str) -> torch.Tensor:
@@ -516,7 +522,7 @@ class SoftLabelTrainer(Trainer):
                 target_dist = torch.stack((targets, 1 - targets), dim=-1)
                 pred_dist = torch.stack((probs, 1 - probs), dim=-1)
                 mixture = 0.5 * (target_dist + pred_dist)
-                loss = 0.5 * ((target_dist * (target_dist.clamp_min(1e-8).log() - mixture.clamp_min(1e-8).log())).sum(dim=-1) + (pred_dist * (pred_dist.clamp_min(1e-8).log() - mixture.clamp_min(1e-8).log())).sum(dim=-1)).mean()
+                loss = 0.5 * ((target_dist * (target_dist.clamp_min(1e-8).log() - mixture.clamp_min(1e-8).log())).sum(dim=-1) + (pred_dist * (pred_dist.clamp_min(1e-8).log() - mixture.clamp_min(1e-8).log())).sum(dim=-1)).mean() / math.log(2.0)
             else:
                 loss = F.binary_cross_entropy_with_logits(logits, targets)
         elif self.head_type == "multilevel_classification":
@@ -549,6 +555,7 @@ class HLVTrainer:
         self.model = None
 
     def initialize_model(self) -> None:
+        set_seed(self.config.seed)
         model_name = self.config.model_name_or_path
         print(f"Initializing model: {model_name}", flush=True)
         print("Loading tokenizer...", flush=True)
@@ -685,6 +692,11 @@ class HLVTrainer:
                         ]
                     else:
                         data["soft_labels"] = extract_soft_labels(samples)  # type: ignore[arg-type]
+            if self.config.head_type == "multilevel_classification":
+                for level in MULTILEVEL_LEVEL_ORDER:
+                    data[f"metric_labels_{level}"] = [s.hard_labels[level] for s in samples]
+            else:
+                data["metric_labels"] = [s.labels if self.config.head_type == "multilabel_classification" else s.label for s in samples]
             return Dataset.from_dict(data).map(tokenize_function, batched=True)
 
         def build_rel_dataset(samples: List[Union[TextPairClassificationSample, TextPairDistributionSample]]) -> Dataset:
@@ -784,7 +796,7 @@ class HLVTrainer:
             level_labels = {level: np.asarray(labels[idx]) for idx, level in enumerate(MULTILEVEL_LEVEL_ORDER)}
             return level_probs, level_labels
 
-        def _metrics_from_level_probs(level_probs: dict[str, np.ndarray], level_labels: dict[str, np.ndarray]) -> dict:
+        def _metrics_from_level_probs(level_probs: dict[str, np.ndarray], level_labels: dict[str, np.ndarray], hard_targets) -> dict:
             metrics: dict[str, float] = {}
             accuracies: List[float] = []
             tvrs: List[float] = []
@@ -798,7 +810,7 @@ class HLVTrainer:
                 if self.config.use_soft_labels or self.config.use_soft_eval_metrics:
                     labels = labels.astype(np.float32)
                     labels = labels / np.clip(labels.sum(axis=-1, keepdims=True), a_min=1e-8, a_max=None)
-                    true_labels = labels.argmax(axis=-1)
+                    true_labels = np.asarray(hard_targets[MULTILEVEL_LEVEL_ORDER.index(level)])
                     accuracy = float((pred_labels == true_labels).mean())
                     eps = 1e-8
                     kl_div = float(np.mean(np.sum(labels * (np.log(labels + eps) - np.log(probs + eps)), axis=-1)))
@@ -822,12 +834,17 @@ class HLVTrainer:
 
         def compute_metrics(eval_pred: EvalPrediction) -> dict:
             predictions = eval_pred.predictions
-            labels = eval_pred.label_ids
+            all_labels = eval_pred.label_ids
+            if self.config.head_type == "multilevel_classification":
+                count = len(MULTILEVEL_LEVEL_ORDER)
+                labels, hard_targets = all_labels[:count], all_labels[count:]
+            else:
+                labels, hard_targets = all_labels
 
             if self.config.head_type == "multilabel_classification":
                 pred_probs = torch.sigmoid(torch.tensor(predictions)).cpu().numpy()
                 targets = np.asarray(labels, dtype=np.float32)
-                pred_hard, target_hard = pred_probs >= 0.5, targets >= 0.5
+                pred_hard, target_hard = pred_probs >= 0.5, np.asarray(hard_targets, dtype=bool)
                 denom = pred_hard.sum() + target_hard.sum()
                 micro_f1 = float(2 * np.logical_and(pred_hard, target_hard).sum() / denom) if denom else 1.0
                 macro_denominators = pred_hard.sum(axis=0) + target_hard.sum(axis=0)
@@ -847,7 +864,7 @@ class HLVTrainer:
                 }
             if self.config.head_type == "multilevel_classification":
                 level_probs, level_labels = _prepare_multilevel_predictions(predictions, labels)
-                return _metrics_from_level_probs(level_probs, level_labels)
+                return _metrics_from_level_probs(level_probs, level_labels, hard_targets)
 
             pred_probs = torch.softmax(torch.tensor(predictions), dim=-1).cpu().numpy()
 
@@ -856,7 +873,7 @@ class HLVTrainer:
             if self.config.use_soft_labels or self.config.use_soft_eval_metrics:
                 labels = np.asarray(labels, dtype=np.float32)
                 labels = labels / np.clip(labels.sum(axis=-1, keepdims=True), a_min=1e-8, a_max=None)
-                true_labels = labels.argmax(axis=-1)
+                true_labels = np.asarray(hard_targets)
                 accuracy = float((pred_labels == true_labels).mean())
 
                 eps = 1e-8
@@ -908,6 +925,7 @@ class HLVTrainer:
         output_path.mkdir(parents=True, exist_ok=True)
         self.model.save_pretrained(output_path)
         self.tokenizer.save_pretrained(output_path)
+        (output_path / "training_config.json").write_text(json.dumps(asdict(self.config), indent=2) + "\n", encoding="utf-8")
         print(f"Model saved to {output_path}")
 
     def save_model(self, path: str) -> None:

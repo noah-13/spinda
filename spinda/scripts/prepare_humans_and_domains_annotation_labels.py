@@ -19,7 +19,7 @@ def _normalise_label(task: str, value: Any) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{task} annotation must be a non-empty string.")
     value = value.strip()
-    return "No Topic" if task == "topic1" and value.casefold() == "no topic" else value
+    return "No Topic" if task in {"topic1", "topic2"} and value.casefold() == "no topic" else value
 
 
 def _load(input_dir: Path, unit: str) -> dict[str, dict[str, Mapping[str, Any]]]:
@@ -56,7 +56,7 @@ def _record(item_id: str, row: Mapping[str, Any], split: str, task: str, label_t
         "id": f"humans_and_domains:{task}:{split}:{item_id}",
         "text": text,
         "annotation_labels": votes,
-        "meta": {"source_id": item_id, "gold_genre": row.get("gold_genre"), "annotators": row.get("annotators")},
+        "meta": {"label_identity": {"id": f"{split}:{item_id}", "namespace": f"tgegum:{task}"}, "source_id": item_id, "gold_genre": row.get("gold_genre"), "annotators": row.get("annotators")},
     }
 
 
@@ -64,6 +64,7 @@ def _write_single_task(splits: Mapping[str, Mapping[str, Mapping[str, Any]]], ou
     labels = _task_labels(splits, task)
     label_to_id = {label: index for index, label in enumerate(labels)}
     output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "normalized_topics_v1").unlink(missing_ok=True)
     manifest = {"format": "single_text_label_distribution", "label_mode": "soft", "labels": labels, "train_path": str(output_dir / "train.json"), "dev_path": str(output_dir / "dev.json")}
     (output_dir / "dataset.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     counts = {}
@@ -71,6 +72,7 @@ def _write_single_task(splits: Mapping[str, Mapping[str, Mapping[str, Any]]], ou
         records = [_record(item_id, row, split, task, label_to_id) for item_id, row in rows.items()]
         write_records(output_dir / f"{split}.json", records)
         counts[split] = len(records)
+    (output_dir / "normalized_topics_v1").write_text("complete\n")
     return counts
 
 
@@ -78,6 +80,7 @@ def _write_multilevel(splits: Mapping[str, Mapping[str, Mapping[str, Any]]], out
     labels = {f"level{index + 1}": _task_labels(splits, task) for index, task in enumerate(TASKS)}
     ids = {level: {label: index for index, label in enumerate(values)} for level, values in labels.items()}
     output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "normalized_topics_v1").unlink(missing_ok=True)
     manifest = {"format": "single_text_multidimensional_label_distribution", "label_mode": "soft", "level_labels": labels, "train_path": str(output_dir / "train.json"), "dev_path": str(output_dir / "dev.json")}
     (output_dir / "dataset.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     counts = {}
@@ -97,9 +100,10 @@ def _write_multilevel(splits: Mapping[str, Mapping[str, Mapping[str, Any]]], out
                 distribution = [level_votes.count(index) / len(level_votes) for index in range(len(labels[level]))]
                 human_dists[level] = distribution
                 hard_labels[level] = tied_argmax(distribution, str(item_id), f"humans_and_domains:{level}")
-            records.append({"_schema": "SingleTextMultilevelSample", "id": f"humans_and_domains:multilevel:{split}:{item_id}", "task": "humans_and_domains", "split": split, "source": "tgegum", "text": text, "annotation_labels": votes, "meta": {"source_id": item_id, "dimension_tasks": {"level1": "genre", "level2": "topic1", "level3": "topic2"}}})
+            records.append({"_schema": "SingleTextMultilevelSample", "id": f"humans_and_domains:multilevel:{split}:{item_id}", "task": "humans_and_domains", "split": split, "source": "tgegum", "text": text, "annotation_labels": votes, "meta": {"label_identity": {level: {"id": f"{split}:{item_id}", "namespace": f"tgegum:{task}"} for level, task in zip(labels, TASKS)}, "source_id": item_id, "dimension_tasks": {"level1": "genre", "level2": "topic1", "level3": "topic2"}}})
         write_records(output_dir / f"{split}.json", records)
         counts[split] = len(records)
+    (output_dir / "normalized_topics_v1").write_text("complete\n")
     return counts
 
 

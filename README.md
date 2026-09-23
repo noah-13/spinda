@@ -152,9 +152,11 @@ The [evaluation metrics guide](docs/evaluation_metrics.md) defines every metric,
 ### An external model
 
 The evaluation and analysis commands also work independently of SPInDa
-training. Convert an external model's output to the [prediction JSON
-contract](docs/prediction_contract.md#prediction-json): a `.json` top-level
-array whose records have a matching `id`, a probability vector in the dataset's class order, and a zero-based predicted class:
+training. Convert an external model’s output to the [prediction JSON
+contract](docs/prediction_contract.md#prediction-json): either a top-level JSON
+array or an object containing a `predictions` array. Each record must have a
+matching `id`, a probability vector in the dataset’s class order, and a
+zero-based predicted class:
 
 ```json
 [

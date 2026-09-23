@@ -1,9 +1,0 @@
-{
-  "format": "text_pair_label_distribution",
-  "label_mode": "soft",
-  "train_path": "data/datasets/text_pair/chaosnli/mnli_m/0/train.json",
-  "dev_path": "data/datasets/text_pair/chaosnli/mnli_m/0/dev.json",
-  "labels": ["entailment", "neutral", "contradiction"],
-  "device": "cuda:0",
-  "output_dir": "outputs/chaosnli_example"
-}
