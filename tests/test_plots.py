@@ -4,7 +4,7 @@ import pytest
 
 matplotlib.use("Agg")
 
-from hlv_toolkits.visualization import (
+from spinda.visualization import (
     get_boundaries,
     plot_bootstrap_bounds,
     plot_ternary_axes,

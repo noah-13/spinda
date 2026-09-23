@@ -48,7 +48,7 @@ run() {
   mkdir -p "$seed_output_dir"
   printf 'started %s\n' "$(date --iso-8601=seconds)" >> "$status_file"
   [[ -z "$resume_checkpoint" ]] || resume_args=(--resume_from_checkpoint "$resume_checkpoint")
-  if uv run python -m hlv_toolkits.scripts.train \
+  if uv run python -m spinda.scripts.train \
     --config "$TRAINING_CONFIG" "$DATASET_CONFIG" \
     --label_mode "$label_mode" --label_training_strategy "$strategy" \
     --model "$model" --device "$DEVICE" --output_dir "$output_dir" --seeds "$seed" "${resume_args[@]}" "${DEV_METRIC_ARGS[@]}"; then

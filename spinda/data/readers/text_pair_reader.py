@@ -6,10 +6,10 @@ import warnings
 from pathlib import Path
 from typing import Any, Iterator, List, Literal, Optional, Sequence
 
-from hlv_toolkits.data.readers.base import BaseReader
-from hlv_toolkits.data.json_io import load_records, split_path
-from hlv_toolkits.data.tie_breaking import tied_argmax
-from hlv_toolkits.data.schemas import Split, TextPairClassificationSample, TextPairDistributionSample
+from spinda.data.readers.base import BaseReader
+from spinda.data.json_io import load_records, split_path
+from spinda.data.tie_breaking import tied_argmax
+from spinda.data.schemas import Split, TextPairClassificationSample, TextPairDistributionSample
 
 TEXT_PAIR_TASK = "text_pair_label_distribution"
 MANIFEST_FILENAME = "dataset.json"

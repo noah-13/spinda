@@ -2,15 +2,15 @@ import json
 
 import pytest
 
-from hlv_toolkits.data.schemas import (
+from spinda.data.schemas import (
     MultilevelSample,
     PredictionRecord,
     SingleTextMultilevelSample,
     SingleTextMultilabelDistributionSample,
     TextPairDistributionSample,
 )
-from hlv_toolkits.eval import DEFAULT_CATEGORICAL_DISTRIBUTION_METRICS, Evaluator
-from hlv_toolkits.scripts.evaluate import (
+from spinda.eval import DEFAULT_CATEGORICAL_DISTRIBUTION_METRICS, Evaluator
+from spinda.scripts.evaluate import (
     _build_multilevel_eval_inputs,
     _filter_metrics,
     _infer_prediction_kind,

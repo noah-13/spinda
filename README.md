@@ -56,7 +56,7 @@ license.
 
 ```bash
 uv run spinda download chaosnli
-uv run python -m hlv_toolkits.scripts.prepare_chaosnli_annotation_labels \
+uv run python -m spinda.scripts.prepare_chaosnli_annotation_labels \
   --subsets mnli_m --fold 0
 ```
 

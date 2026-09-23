@@ -5,5 +5,5 @@
   "train_batch_size": 32,
   "eval_batch_size": 64,
   "max_length": 128,
-  "seeds": [42, 43, 44]
+  "seeds": [42]
 }

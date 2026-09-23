@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from hlv_toolkits.eval.disagreement import (
+from spinda.eval.disagreement import (
     assign_disagreement_strata,
     compute_instance_distribution_errors,
     disagreement_stratified_evaluation,

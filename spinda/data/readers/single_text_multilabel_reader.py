@@ -5,10 +5,10 @@ import json
 from pathlib import Path
 from typing import List, Optional, Sequence
 
-from hlv_toolkits.data.readers.base import BaseReader
-from hlv_toolkits.data.json_io import load_records, split_path
-from hlv_toolkits.data.tie_breaking import binary_threshold
-from hlv_toolkits.data.schemas import SingleTextMultilabelDistributionSample, Split
+from spinda.data.readers.base import BaseReader
+from spinda.data.json_io import load_records, split_path
+from spinda.data.tie_breaking import binary_threshold
+from spinda.data.schemas import SingleTextMultilabelDistributionSample, Split
 
 SINGLE_TEXT_MULTILABEL_TASK = "single_text_multilabel_annotation_distribution"
 

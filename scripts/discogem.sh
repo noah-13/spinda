@@ -44,7 +44,7 @@ for variant in $VARIANTS; do
         for level in "${LEVELS[@]}"; do
           dataset_config="$DISCOGEM_DATA_ROOT/$variant/$level/dataset.json"
           if [[ "${FORCE_PREPARE:-0}" == "1" || ! -s "$dataset_config" || ! -s "${dataset_config%/dataset.json}/train.json" || ! -s "${dataset_config%/dataset.json}/dev.json" || ! -s "${dataset_config%/dataset.json}/test.json" ]]; then
-            uv run python -m hlv_toolkits.scripts.prepare_discogem_annotation_labels --variants "$variant"
+            uv run python -m spinda.scripts.prepare_discogem_annotation_labels --variants "$variant"
           fi
           DATASET_CONFIG="$dataset_config" RUN_NAME="$level" OUT_ROOT="$OUT_ROOT/$variant" \
             TRAINING_CONFIG="$TRAINING_CONFIG" MODEL_SPECS="$variant_models" RUN_SPECS="$RUN_SPECS" \
@@ -55,7 +55,7 @@ for variant in $VARIANTS; do
       joint)
         dataset_config="$DISCOGEM_DATA_ROOT/$variant/multilevel/dataset.json"
         if [[ "${FORCE_PREPARE:-0}" == "1" || ! -s "$dataset_config" || ! -s "${dataset_config%/dataset.json}/train.json" || ! -s "${dataset_config%/dataset.json}/dev.json" || ! -s "${dataset_config%/dataset.json}/test.json" ]]; then
-          uv run python -m hlv_toolkits.scripts.prepare_discogem_annotation_labels --variants "$variant"
+          uv run python -m spinda.scripts.prepare_discogem_annotation_labels --variants "$variant"
         fi
         DATASET_CONFIG="$dataset_config" RUN_NAME="$variant" OUT_ROOT="$OUT_ROOT/joint" \
           TRAINING_CONFIG="$TRAINING_CONFIG" MODEL_SPECS="$variant_models" RUN_SPECS="$RUN_SPECS" \

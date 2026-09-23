@@ -2,10 +2,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any, List, Mapping, Optional, Sequence
-from hlv_toolkits.data.readers.base import BaseReader
-from hlv_toolkits.data.json_io import load_records, split_path
-from hlv_toolkits.data.tie_breaking import tied_argmax
-from hlv_toolkits.data.schemas import MultilevelSample, Split
+from spinda.data.readers.base import BaseReader
+from spinda.data.json_io import load_records, split_path
+from spinda.data.tie_breaking import tied_argmax
+from spinda.data.schemas import MultilevelSample, Split
 
 class TextPairMultilevelJSONReader(BaseReader):
     LEVEL_ORDER = ("level1", "level2", "level3")

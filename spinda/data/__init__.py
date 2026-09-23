@@ -1,5 +1,5 @@
 # Data module exports
-from hlv_toolkits.data.schemas import (
+from spinda.data.schemas import (
     AnySample,
     BaseSample,
     MultilevelSample,
@@ -12,14 +12,14 @@ from hlv_toolkits.data.schemas import (
     PredictionRecord,
     Split,
 )
-from hlv_toolkits.data.readers.base import (
+from spinda.data.readers.base import (
     BaseReader,
 )
-from hlv_toolkits.data.readers.multilevel_reader import TextPairMultilevelJSONReader
-from hlv_toolkits.data.readers.text_pair_reader import TextPairClassificationJSONReader
-from hlv_toolkits.data.readers.single_text_reader import SingleTextClassificationJSONReader
-from hlv_toolkits.data.readers.single_text_multilabel_reader import SingleTextMultilabelJSONReader
-from hlv_toolkits.data.readers.single_text_multilevel_reader import SingleTextMultilevelJSONReader
+from spinda.data.readers.multilevel_reader import TextPairMultilevelJSONReader
+from spinda.data.readers.text_pair_reader import TextPairClassificationJSONReader
+from spinda.data.readers.single_text_reader import SingleTextClassificationJSONReader
+from spinda.data.readers.single_text_multilabel_reader import SingleTextMultilabelJSONReader
+from spinda.data.readers.single_text_multilevel_reader import SingleTextMultilevelJSONReader
 
 __all__ = [
     # Schemas

@@ -14,8 +14,8 @@ import random
 from pathlib import Path
 from typing import Any
 
-from hlv_toolkits.scripts.download_data import download_chaosnli
-from hlv_toolkits.data.json_io import write_records
+from spinda.scripts.download_data import download_chaosnli
+from spinda.data.json_io import write_records
 
 
 LABELS = ["entailment", "neutral", "contradiction"]

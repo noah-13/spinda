@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 import math
 
-from hlv_toolkits.eval.metrics import (
+from spinda.eval.metrics import (
     validate_and_fix_probs,
     compute_tvd,
     compute_distance_correlation,

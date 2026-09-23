@@ -1,7 +1,7 @@
 import json
 
-from hlv_toolkits.data import SingleTextMultilabelJSONReader
-from hlv_toolkits.scripts.prepare_mfrc_annotation_labels import prepare_mfrc
+from spinda.data import SingleTextMultilabelJSONReader
+from spinda.scripts.prepare_mfrc_annotation_labels import prepare_mfrc
 
 
 def test_prepare_mfrc_groups_annotators_and_reader_preserves_votes(tmp_path):

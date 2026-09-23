@@ -3,7 +3,7 @@
 Evaluation script for HLV predictions.
 
 Example usage:
-    uv run python -m hlv_toolkits.scripts.evaluate\
+    uv run python -m spinda.scripts.evaluate\
         --predictions outputs/predictions/toolkit_preds.json\
         --data_dir data/datasets/text_pair/chaosnli
 """
@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
-from hlv_toolkits.data import (
+from spinda.data import (
     SingleTextClassificationJSONReader,
     SingleTextClassificationSample,
     SingleTextDistributionSample,
@@ -29,12 +29,12 @@ from hlv_toolkits.data import (
     PredictionRecord,
     TextPairClassificationJSONReader,
 )
-from hlv_toolkits.eval import Evaluator, analyze_distributional_disagreement, instance_error_records
-from hlv_toolkits.visualization import (
+from spinda.eval import Evaluator, analyze_distributional_disagreement, instance_error_records
+from spinda.visualization import (
     save_distribution_ternary_plot,
     save_interactive_distribution_ternary_plot,
 )
-from hlv_toolkits.data.json_io import load_records
+from spinda.data.json_io import load_records
 
 
 MultilevelGroundTruthSample = Union[MultilevelSample, SingleTextMultilevelSample]
@@ -397,7 +397,7 @@ def main() -> None:
     prediction_kind = _infer_prediction_kind(predictions)
     print(f"Inferred prediction contract: {prediction_kind}")
     
-    from hlv_toolkits.scripts.predict import _load_inputs
+    from spinda.scripts.predict import _load_inputs
     _, input_samples = _load_inputs(Path(args.input_file))
     input_ids = {sample["id"] for sample in input_samples}
     prediction_ids = {prediction.id for prediction in predictions}

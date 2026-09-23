@@ -6,8 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from hlv_toolkits.scripts.download_data import download_md_agreement
-from hlv_toolkits.data.json_io import write_records
+from spinda.scripts.download_data import download_md_agreement
+from spinda.data.json_io import write_records
 
 
 def _annotation_votes(row: dict[str, Any], source: Path, item_id: str) -> list[int]:

@@ -1,4 +1,4 @@
-from hlv_toolkits.visualization.plots import (
+from spinda.visualization.plots import (
     get_boundaries,
     plot_bootstrap_bounds,
     plot_ternary_axes,

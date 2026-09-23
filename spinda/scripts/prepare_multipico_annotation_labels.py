@@ -7,8 +7,8 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
-from hlv_toolkits.scripts.download_data import download_multipico
-from hlv_toolkits.data.json_io import write_records
+from spinda.scripts.download_data import download_multipico
+from spinda.data.json_io import write_records
 
 LABELS = ["not_ironic", "ironic"]
 

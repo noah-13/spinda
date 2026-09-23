@@ -14,12 +14,12 @@ import json
 import tarfile
 from collections import Counter
 
-from hlv_toolkits.data.tie_breaking import tied_argmax
-from hlv_toolkits.data.json_io import write_records
+from spinda.data.tie_breaking import tied_argmax
+from spinda.data.json_io import write_records
 from fractions import Fraction
 from pathlib import Path
 
-from hlv_toolkits.scripts.download_data import download_discogem
+from spinda.scripts.download_data import download_discogem
 
 LANGUAGES = ("en", "de", "fr", "cs")
 LABELS = {

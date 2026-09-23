@@ -1,12 +1,12 @@
 import json
-from hlv_toolkits.models.trainer import TrainingConfig
+from spinda.models.trainer import TrainingConfig
 from pathlib import Path
 
 import pytest
 
 pytestmark = pytest.mark.skip(reason="Superseded by the annotation_labels-only public contract.")
-from hlv_toolkits.data import TextPairClassificationJSONReader
-from hlv_toolkits.data.schemas import TextPairClassificationSample
+from spinda.data import TextPairClassificationJSONReader
+from spinda.data.schemas import TextPairClassificationSample
 
 
 def write_dataset(path: Path, rows: list[dict]) -> None:

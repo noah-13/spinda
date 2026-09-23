@@ -3,7 +3,7 @@
 Training script for HLV classification models.
 
 Example usage:
-    python -m hlv_toolkits.scripts.train \
+    python -m spinda.scripts.train \
         --model roberta-base \
         --output_dir ./outputs/roberta_snli \
         --num_epochs 3
@@ -17,14 +17,14 @@ from typing import Any
 
 import torch
 
-from hlv_toolkits.data import (
+from spinda.data import (
     TextPairMultilevelJSONReader,
     TextPairClassificationJSONReader,
     SingleTextClassificationJSONReader,
     SingleTextMultilabelJSONReader,
     SingleTextMultilevelJSONReader,
 )
-from hlv_toolkits.models import HLVTrainer, TrainingConfig
+from spinda.models import HLVTrainer, TrainingConfig
 
 
 DATA_FORMAT_SPECS = {

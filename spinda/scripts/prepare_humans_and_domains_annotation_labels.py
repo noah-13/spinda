@@ -7,9 +7,9 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Mapping
 
-from hlv_toolkits.data.tie_breaking import tied_argmax
-from hlv_toolkits.data.json_io import write_records
-from hlv_toolkits.scripts.download_data import download_humans_and_domains
+from spinda.data.tie_breaking import tied_argmax
+from spinda.data.json_io import write_records
+from spinda.scripts.download_data import download_humans_and_domains
 
 TASKS = ("genre", "topic1", "topic2")
 UNITS = ("sent",)

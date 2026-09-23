@@ -1,6 +1,6 @@
 import json
 
-from hlv_toolkits.data.readers.single_text_multilevel_reader import SingleTextMultilevelJSONReader
+from spinda.data.readers.single_text_multilevel_reader import SingleTextMultilevelJSONReader
 
 
 def test_single_text_multilevel_reader_uses_text_field_and_manifest(tmp_path):

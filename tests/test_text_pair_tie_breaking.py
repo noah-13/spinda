@@ -1,6 +1,6 @@
 import json
 
-from hlv_toolkits.data import TextPairClassificationJSONReader
+from spinda.data import TextPairClassificationJSONReader
 
 
 def test_vote_distribution_labels_break_ties_reproducibly_without_lowest_label_bias(tmp_path):

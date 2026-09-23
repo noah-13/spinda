@@ -39,5 +39,5 @@ instance-TVD violin figures under `outputs/demo/analysis`.
 If the processed data is absent, prepare the real source once:
 
 ```bash
-uv run python -m hlv_toolkits.scripts.prepare_chaosnli_annotation_labels --subsets mnli_m --fold 0
+uv run python -m spinda.scripts.prepare_chaosnli_annotation_labels --subsets mnli_m --fold 0
 ```

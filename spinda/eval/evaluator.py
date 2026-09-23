@@ -7,14 +7,14 @@ from typing import Collection, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
-from hlv_toolkits.data.schemas import (
+from spinda.data.schemas import (
     SingleTextDistributionSample,
     SingleTextMultilabelDistributionSample,
     TextPairClassificationSample,
     TextPairDistributionSample,
     PredictionRecord,
 )
-from hlv_toolkits.eval.metrics import (
+from spinda.eval.metrics import (
     compute_tvd,
     compute_distance_correlation,
     compute_entropy_correlation,

@@ -4,10 +4,10 @@ from __future__ import annotations
 import json
 from typing import List
 
-from hlv_toolkits.data.readers.multilevel_reader import TextPairMultilevelJSONReader
-from hlv_toolkits.data.json_io import load_records, split_path
-from hlv_toolkits.data.schemas import SingleTextMultilevelSample, Split
-from hlv_toolkits.data.tie_breaking import tied_argmax
+from spinda.data.readers.multilevel_reader import TextPairMultilevelJSONReader
+from spinda.data.json_io import load_records, split_path
+from spinda.data.schemas import SingleTextMultilevelSample, Split
+from spinda.data.tie_breaking import tied_argmax
 
 
 class SingleTextMultilevelJSONReader(TextPairMultilevelJSONReader):

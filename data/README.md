@@ -256,5 +256,5 @@ and annotation alignment before training. See the
 and all training options.
 
 For custom data that does not fit a public format yet, add a reader that emits
-the normalized sample objects in `hlv_toolkits.data.schemas`, then document the
+the normalized sample objects in `spinda.data.schemas`, then document the
 new format before relying on it in a release.

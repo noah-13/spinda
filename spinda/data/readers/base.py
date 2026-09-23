@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import List, Protocol, runtime_checkable
 
-from hlv_toolkits.data.schemas import (
+from spinda.data.schemas import (
     AnySample,
     Split,
 )

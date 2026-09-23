@@ -1,7 +1,9 @@
 import json
+import os
 
-from hlv_toolkits.models.trainer import TrainingConfig
-from hlv_toolkits.scripts.train import DATA_FORMAT_SPECS, _load_json_config
+from spinda.models import trainer as trainer_module
+from spinda.models.trainer import TrainingConfig
+from spinda.scripts.train import DATA_FORMAT_SPECS, _load_json_config
 
 
 def test_format_determines_model_head_type():
@@ -54,3 +56,21 @@ def test_multilabel_metric_for_best_model_checkpoint_selection_direction(tmp_pat
         ).to_training_args()
         assert args.metric_for_best_model == metric_name
         assert args.greater_is_better is True
+
+
+def test_explicit_cuda_device_uses_one_gpu_without_changing_process_environment(monkeypatch, tmp_path):
+    observed = {}
+
+    class FakeTrainingArguments:
+        def __init__(self, **kwargs):
+            observed["accelerate_device"] = os.environ.get("ACCELERATE_TORCH_DEVICE")
+
+    monkeypatch.setattr(trainer_module, "TrainingArguments", FakeTrainingArguments)
+    monkeypatch.delenv("LOCAL_RANK", raising=False)
+    monkeypatch.delenv("ACCELERATE_TORCH_DEVICE", raising=False)
+
+    args = TrainingConfig(output_dir=str(tmp_path / "run"), device="cuda:1").to_training_args()
+
+    assert observed["accelerate_device"] == "cuda:1"
+    assert args._n_gpu == 1
+    assert "ACCELERATE_TORCH_DEVICE" not in os.environ

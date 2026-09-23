@@ -34,7 +34,7 @@ for variant in $VARIANTS; do
   data_dir="$MULTIPICO_DATA_ROOT/$variant"
   dataset_config="$data_dir/dataset.json"
   if [[ "${FORCE_PREPARE:-0}" == "1" || ! -s "$dataset_config" || ! -s "$data_dir/train.json" || ! -s "$data_dir/dev.json" || ! -s "$data_dir/test.json" ]]; then
-    uv run python -m hlv_toolkits.scripts.prepare_multipico_annotation_labels \
+    uv run python -m spinda.scripts.prepare_multipico_annotation_labels \
       --input-dir "$MULTIPICO_INPUT_DIR" --output-dir "$data_dir" "${prepare_args[@]}"
   fi
 

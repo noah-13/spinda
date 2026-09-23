@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from hlv_toolkits.data.readers.multilevel_reader import TextPairMultilevelJSONReader
-from hlv_toolkits.data.readers.single_text_multilevel_reader import SingleTextMultilevelJSONReader
+from spinda.data.readers.multilevel_reader import TextPairMultilevelJSONReader
+from spinda.data.readers.single_text_multilevel_reader import SingleTextMultilevelJSONReader
 
 
 def _write_records(path, records):

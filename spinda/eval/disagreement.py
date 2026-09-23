@@ -6,7 +6,7 @@ from typing import Dict, Iterable, Optional, Sequence
 
 import numpy as np
 
-from hlv_toolkits.eval.metrics import compute_cross_entropy, compute_euclidean_distance, compute_jsd, compute_kl, compute_tvd, validate_and_fix_probs
+from spinda.eval.metrics import compute_cross_entropy, compute_euclidean_distance, compute_jsd, compute_kl, compute_tvd, validate_and_fix_probs
 
 INSTANCE_ERROR_METRICS = ("tvd", "jsd", "kl", "ce", "l2")
 

@@ -40,10 +40,10 @@ plot = [
 ]
 
 [project.scripts]
-spinda = "hlv_toolkits.cli:main"
+spinda = "spinda.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["hlv_toolkits*"]
+include = ["spinda*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

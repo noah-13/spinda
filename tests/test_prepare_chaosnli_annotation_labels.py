@@ -1,4 +1,4 @@
-from hlv_toolkits.scripts.prepare_chaosnli_annotation_labels import _split_kfold_train_dev_test
+from spinda.scripts.prepare_chaosnli_annotation_labels import _split_kfold_train_dev_test
 
 
 def _row(identifier: str, text_a: str, text_b: str) -> dict[str, str]:

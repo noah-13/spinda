@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from hlv_toolkits.data.json_io import load_records, write_records
+from spinda.data.json_io import load_records, write_records
 
 
 def test_write_records_uses_json_arrays_and_rejects_jsonl(tmp_path):

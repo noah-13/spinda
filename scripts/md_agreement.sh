@@ -20,7 +20,7 @@ FORCE_PREPARE="${FORCE_PREPARE:-0}"
 # fields required by the generic training configuration contract.
 if [[ "$FORCE_PREPARE" == "1" || ! -s "$DATA_DIR/dataset.json" || ! -s "$DATA_DIR/train.json" || ! -s "$DATA_DIR/dev.json" || ! -s "$DATA_DIR/test.json" ]] \
   || ! uv run python -c 'import json, sys; manifest = json.load(open(sys.argv[1])); sys.exit(not all(manifest.get(key) for key in ("train_path", "dev_path")))' "$DATA_DIR/dataset.json"; then
-  uv run python -m hlv_toolkits.scripts.prepare_md_agreement_annotation_labels \
+  uv run python -m spinda.scripts.prepare_md_agreement_annotation_labels \
     --input-dir "$INPUT_DIR" --output-dir "$DATA_DIR"
 fi
 

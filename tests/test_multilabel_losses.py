@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import torch
 import torch.nn.functional as F
 
-from hlv_toolkits.models.trainer import SoftLabelTrainer
+from spinda.models.trainer import SoftLabelTrainer
 
 
 class _Model:

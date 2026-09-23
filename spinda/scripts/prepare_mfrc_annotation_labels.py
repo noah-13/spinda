@@ -8,7 +8,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Iterable
 
-from hlv_toolkits.data.json_io import write_records
+from spinda.data.json_io import write_records
 
 MFRC_LABELS = ["Care", "Equality", "Proportionality", "Loyalty", "Authority", "Purity", "Thin Morality", "Non-Moral"]
 MFRC_LABEL_TO_ID = {label: index for index, label in enumerate(MFRC_LABELS)}

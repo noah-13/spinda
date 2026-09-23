@@ -5,10 +5,10 @@ import json
 from pathlib import Path
 from typing import List, Literal, Optional, Sequence
 
-from hlv_toolkits.data.readers.base import BaseReader
-from hlv_toolkits.data.json_io import load_records, split_path
-from hlv_toolkits.data.tie_breaking import tied_argmax
-from hlv_toolkits.data.schemas import SingleTextClassificationSample, SingleTextDistributionSample, Split
+from spinda.data.readers.base import BaseReader
+from spinda.data.json_io import load_records, split_path
+from spinda.data.tie_breaking import tied_argmax
+from spinda.data.schemas import SingleTextClassificationSample, SingleTextDistributionSample, Split
 
 SINGLE_TEXT_TASK = "single_text_label_distribution"
 LabelMode = Literal["hard", "soft", "soft_to_hard"]

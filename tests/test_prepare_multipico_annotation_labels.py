@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from hlv_toolkits.scripts.prepare_multipico_annotation_labels import LABELS, prepare_multipico
+from spinda.scripts.prepare_multipico_annotation_labels import LABELS, prepare_multipico
 
 
 def _item(split: str, labels: dict[str, str]) -> dict:

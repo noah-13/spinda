@@ -48,7 +48,7 @@ raise SystemExit(not required.issubset(metrics))
     mkdir -p "$test_dir"
     if [[ ! -s "$predictions" ]]; then
       echo "Generating test predictions: $seed_dir"
-      uv run python -m hlv_toolkits.scripts.predict \
+      uv run python -m spinda.scripts.predict \
         --model_path "$model_dir" --input_file "$dataset_dir/test.json" --config "$dataset_config" \
         --device cuda:0 --batch_size "$PREDICT_BATCH_SIZE" --max_length "$PREDICT_MAX_LENGTH" \
         --output_file "$predictions"
@@ -57,7 +57,7 @@ raise SystemExit(not required.issubset(metrics))
     fi
 
     echo "Evaluating test predictions: $seed_dir"
-    uv run python -m hlv_toolkits.scripts.evaluate \
+    uv run python -m spinda.scripts.evaluate \
       --predictions "$predictions" --input_file "$dataset_dir/test.json" \
       --human_labels "$dataset_dir/test.json" \
       --output_file "$evaluation"
@@ -68,7 +68,7 @@ for subset in $SUBSETS; do
   dataset_dir="$DATA_DIR/$subset/$FOLD"
   dataset_config="$DATA_DIR/$subset/$FOLD/dataset.json"
   if [[ "$FORCE_PREPARE" == "1" || ! -s "$dataset_config" || ! -s "$dataset_dir/train.json" || ! -s "$dataset_dir/dev.json" || ! -s "$dataset_dir/test.json" ]]; then
-    uv run python -m hlv_toolkits.scripts.prepare_chaosnli_annotation_labels --input_dir "$INPUT_DIR" --output_dir "$DATA_DIR" --subsets "$subset" --fold "$FOLD"
+    uv run python -m spinda.scripts.prepare_chaosnli_annotation_labels --input_dir "$INPUT_DIR" --output_dir "$DATA_DIR" --subsets "$subset" --fold "$FOLD"
   fi
   DATASET_CONFIG="$dataset_config" RUN_NAME="$subset/fold_$FOLD" OUT_ROOT="$OUT_ROOT" TRAINING_CONFIG="$TRAINING_CONFIG" MODEL_SPECS="$MODEL_SPECS" SEEDS_OVERRIDE="${SEEDS_OVERRIDE:-}" GPU="${GPU:-0}" FORCE="${FORCE:-0}" \
     bash "$SWEEP_SCRIPT"

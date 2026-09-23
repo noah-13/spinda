@@ -139,7 +139,7 @@ shapes and the [metric guide](evaluation_metrics.md) for metric selection.
 
 | Key / CLI option | Accepted values | Default | Description |
 |---|---|---|---|
-| `device` / `--device` (training) | `auto`, `cpu`, `cuda`, `cuda:<index>` | `auto` | Training device. |
+| `device` / `--device` (training) | `auto`, `cpu`, `cuda`, `cuda:<index>` | `auto` | Training device. An explicit CUDA device uses one GPU; use a distributed launcher for multi-GPU training. |
 | `fp16` / `--fp16`, `--no-fp16` | Boolean | `false` | Mixed-precision training. |
 | `dataloader_num_workers` / `--dataloader_num_workers` | Integer | `2` | DataLoader worker count; use `0` to disable multiprocessing. |
 | `output_dir` / `--output_dir` | Path | `./outputs` | Root directory for seed runs, checkpoints, and final models. |

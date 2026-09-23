@@ -6,17 +6,17 @@ from types import SimpleNamespace
 
 import torch
 
-from hlv_toolkits.data import (
+from spinda.data import (
     MultilevelSample,
     SingleTextClassificationJSONReader,
     SingleTextMultilabelJSONReader,
     TextPairClassificationJSONReader,
 )
-from hlv_toolkits.data.readers.multilevel_reader import TextPairMultilevelJSONReader
-from hlv_toolkits.data.readers.single_text_multilevel_reader import SingleTextMultilevelJSONReader
-from hlv_toolkits.eval import Evaluator
-from hlv_toolkits.scripts.evaluate import _build_multilevel_eval_inputs, load_predictions
-from hlv_toolkits.scripts.predict import _build_multilevel_outputs, predict_batch
+from spinda.data.readers.multilevel_reader import TextPairMultilevelJSONReader
+from spinda.data.readers.single_text_multilevel_reader import SingleTextMultilevelJSONReader
+from spinda.eval import Evaluator
+from spinda.scripts.evaluate import _build_multilevel_eval_inputs, load_predictions
+from spinda.scripts.predict import _build_multilevel_outputs, predict_batch
 
 
 def _write(path: Path, payload) -> None:
@@ -96,7 +96,7 @@ def test_prediction_input_file_infers_text_pair_shape(tmp_path):
         }],
     )
 
-    from hlv_toolkits.scripts.predict import _load_inputs
+    from spinda.scripts.predict import _load_inputs
 
     input_shape, samples = _load_inputs(input_path)
 
@@ -121,7 +121,7 @@ def test_prediction_configs_merge_left_to_right(tmp_path):
         },
     )
 
-    from hlv_toolkits.scripts.predict import _load_merged_json_configs
+    from spinda.scripts.predict import _load_merged_json_configs
 
     assert _load_merged_json_configs([str(defaults), str(run_config)]) == {
         "device": "cpu",
@@ -135,7 +135,7 @@ def test_prediction_config_rejects_training_metadata(tmp_path):
     config_path = tmp_path / "training.json"
     _write(config_path, {"format": "text_pair_label_distribution", "labels": ["no", "yes"]})
 
-    from hlv_toolkits.scripts.predict import _load_json_config
+    from spinda.scripts.predict import _load_json_config
 
     with pytest.raises(ValueError, match="Unknown prediction config keys.*format.*labels"):
         _load_json_config(str(config_path))

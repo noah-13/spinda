@@ -10,8 +10,8 @@ from typing import Any, Dict, List
 
 import torch
 
-from hlv_toolkits.data.json_io import load_records
-from hlv_toolkits.models.trainer import (
+from spinda.data.json_io import load_records
+from spinda.models.trainer import (
     HLVTrainer,
     MultiLevelClassificationModel,
     TrainingConfig,

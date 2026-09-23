@@ -28,13 +28,13 @@ from transformers.modeling_outputs import SequenceClassifierOutput
 from transformers.trainer_utils import EvalPrediction
 from transformers.utils import ModelOutput
 
-from hlv_toolkits.eval.metrics import (
+from spinda.eval.metrics import (
     compute_multilabel_entropy_correlation,
     compute_multilabel_pojsd,
     compute_soft_macro_f1,
     compute_soft_micro_f1,
 )
-from hlv_toolkits.data.schemas import (
+from spinda.data.schemas import (
     MultilevelSample,
     TextPairClassificationSample,
     TextPairDistributionSample,
@@ -43,6 +43,31 @@ from hlv_toolkits.data.schemas import (
     SingleTextMultilabelDistributionSample,
     SingleTextMultilevelSample,
 )
+
+
+def _build_training_arguments(device: str, **kwargs) -> TrainingArguments:
+    """Create TrainingArguments while honoring an explicit single CUDA device."""
+    is_single_process_cuda = (
+        device.startswith("cuda")
+        and os.environ.get("LOCAL_RANK") in {None, "", "-1"}
+    )
+    if not is_single_process_cuda:
+        return TrainingArguments(**kwargs)
+
+    # Transformers otherwise selects cuda:0 and treats every visible GPU as
+    # available for DataParallel. Accelerate reads this during construction.
+    previous_accelerate_device = os.environ.get("ACCELERATE_TORCH_DEVICE")
+    os.environ["ACCELERATE_TORCH_DEVICE"] = device
+    try:
+        training_args = TrainingArguments(**kwargs)
+    finally:
+        if previous_accelerate_device is None:
+            os.environ.pop("ACCELERATE_TORCH_DEVICE", None)
+        else:
+            os.environ["ACCELERATE_TORCH_DEVICE"] = previous_accelerate_device
+
+    training_args._n_gpu = 1
+    return training_args
 
 
 def load_tokenizer_with_fallback(model_name_or_path: str):
@@ -276,7 +301,8 @@ class TrainingConfig:
             )
             label_names = [f"{prefix}_{level}" for level in MULTILEVEL_LEVEL_ORDER]
 
-        return TrainingArguments(
+        return _build_training_arguments(
+            self.device,
             output_dir=self.output_dir,
             num_train_epochs=self.num_epochs,
             per_device_train_batch_size=self.train_batch_size,
@@ -836,11 +862,17 @@ class HLVTrainer:
                 eps = 1e-8
                 kl_div = float(np.mean(np.sum(labels * (np.log(labels + eps) - np.log(pred_probs + eps)), axis=-1)))
                 tvd = float(np.mean(0.5 * np.sum(np.abs(pred_probs - labels), axis=-1)))
-                return {
+                metrics = {
                     "accuracy": accuracy, "tvd": tvd, "kl_divergence": kl_div,
-                    "soft_micro_f1": compute_soft_micro_f1(pred_probs, labels),
-                    "soft_macro_f1": compute_soft_macro_f1(pred_probs, labels),
                 }
+                # Soft F1 is a derived, opt-in metric for categorical label
+                # distributions. Still emit the selected one so Trainer can
+                # use it for checkpoint selection.
+                if self.config.soft_label_metric_for_best_model == "soft_micro_f1":
+                    metrics["soft_micro_f1"] = compute_soft_micro_f1(pred_probs, labels)
+                elif self.config.soft_label_metric_for_best_model == "soft_macro_f1":
+                    metrics["soft_macro_f1"] = compute_soft_macro_f1(pred_probs, labels)
+                return metrics
 
             labels = np.asarray(labels)
             accuracy = float((pred_labels == labels).mean())

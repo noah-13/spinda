@@ -1,4 +1,4 @@
-from hlv_toolkits.eval.metrics import (
+from spinda.eval.metrics import (
     validate_and_fix_probs,
     compute_tvd,
     compute_distance_correlation,
@@ -13,7 +13,7 @@ from hlv_toolkits.eval.metrics import (
     compute_cross_entropy,
     compute_euclidean_distance
 )
-from hlv_toolkits.eval.disagreement import (
+from spinda.eval.disagreement import (
     analyze_distributional_disagreement,
     assign_disagreement_strata,
     compute_human_entropy,
@@ -21,7 +21,7 @@ from hlv_toolkits.eval.disagreement import (
     disagreement_stratified_evaluation,
     instance_error_records,
 )
-from hlv_toolkits.eval.evaluator import (
+from spinda.eval.evaluator import (
     DEFAULT_CATEGORICAL_DISTRIBUTION_METRICS,
     EvaluationArtifacts,
     Evaluator,

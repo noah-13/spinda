@@ -33,11 +33,11 @@ def main() -> None:
     sys.argv = [sys.argv[0]] + sys.argv[2:]
     
     commands = {
-        "train": "hlv_toolkits.scripts.train",
-        "predict": "hlv_toolkits.scripts.predict",
-        "evaluate": "hlv_toolkits.scripts.evaluate",
-        "download": "hlv_toolkits.scripts.download_data",
-        "analyze": "hlv_toolkits.scripts.analyze",
+        "train": "spinda.scripts.train",
+        "predict": "spinda.scripts.predict",
+        "evaluate": "spinda.scripts.evaluate",
+        "download": "spinda.scripts.download_data",
+        "analyze": "spinda.scripts.analyze",
     }
     module_name = commands.get(command)
     if module_name is None:
