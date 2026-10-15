@@ -28,6 +28,8 @@ analysis/
 analysis_disagreement/
 results/
 artifacts/
+errors-EMNLP26.json
+errors-Format.json
 notebooks/*_results.html
 notebooks/*_dashboard.ipynb
 
@@ -46,6 +48,7 @@ scripts/*_parallel.sh
 scripts/predict_*.sh
 scripts/standard_predict_eval_parallel.sh
 scripts/humans_and_multipico_all_runs.sh
+scripts/evaluate_md_agreement_infoxlm.sh
 scripts/discogem/*_parallel.sh
 scripts/discogem_multilevel_11parts/
 scripts/md_agreement_parts/
