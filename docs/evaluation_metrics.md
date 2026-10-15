@@ -13,7 +13,7 @@ For categorical distribution metrics, model and human inputs are matrices with s
 | `l1` | `2 * mean(tvd)` | Lower |
 | `jsd` | Mean Jensen--Shannon divergence with base-2 logarithms | Lower |
 | `pojsd` | Mean `1 - jsd` | Higher |
-| `kl` | Mean `KL(human || model)` | Lower |
+| `kl` | Mean `KL(human \|\| model)` | Lower |
 | `ce` | Mean cross-entropy `H(human, model)` | Lower |
 | `l2` | Mean Euclidean distance per example | Lower |
 | `soft_micro_f1` | Soft overlap over all examples and classes | Higher |
@@ -47,7 +47,7 @@ are used by the implementation.
 |---|---|---|
 | L1 and TVD | `L1(p, q) = 2 * TVD(p, q)` | Categorical probability vectors. |
 | Soft accuracy and TVD | `soft_accuracy(p, q) = 1 - TVD(p, q)` | Categorical probability vectors. |
-| Cross-entropy and KL | `CE(q, p) = H(q) + KL(q || p)` | The same human distribution `q` and model distribution `p`. |
+| Cross-entropy and KL | `CE(q, p) = H(q) + KL(q \|\| p)` | The same human distribution `q` and model distribution `p`. |
 | PO-JSD and JSD | `PO-JSD(p, q) = 1 - JSD(p, q)` | JSD computed with base-2 logarithms. |
 | Soft micro-F1 and TVD | `soft_micro_f1(p, q) = 1 - TVD(p, q)` | Categorical rows normalized to sum to one. |
 
