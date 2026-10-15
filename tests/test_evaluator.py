@@ -135,8 +135,8 @@ def test_evaluation_infers_prediction_contract_and_filters_metrics(tmp_path):
     defaults = tmp_path / "defaults.json"
     run = tmp_path / "run.json"
     defaults.write_text(json.dumps({"metrics": ["accuracy"], "ternary_source": "model"}), encoding="utf-8")
-    run.write_text(json.dumps({"predictions": "predictions.json", "human_labels": "test.json", "metrics": ["tvd"]}), encoding="utf-8")
+    run.write_text(json.dumps({"predictions": "predictions.json", "data_dir": "dataset", "metrics": ["tvd"]}), encoding="utf-8")
     assert _load_merged_json_configs([str(defaults), str(run)]) == {
         "metrics": ["tvd"], "ternary_source": "model",
-        "predictions": "predictions.json", "human_labels": "test.json",
+        "predictions": "predictions.json", "data_dir": "dataset",
     }

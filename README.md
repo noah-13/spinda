@@ -134,27 +134,43 @@ uv run spinda predict \
 
 uv run spinda evaluate \
   --predictions outputs/chaosnli_example/seed_42/test/predictions.json \
-  --input_file data/datasets/text_pair/chaosnli/mnli_m/0/test.json \
-  --human_labels data/datasets/text_pair/chaosnli/mnli_m/0/test.json \
+  --data_dir data/datasets/text_pair/chaosnli/mnli_m/0 \
   --metrics tvd kl entropy_correlation \
+  --analysis \
   --output_file outputs/chaosnli_example/seed_42/test/evaluation.json
 ```
 
-Not sure which metrics to pass? Start with the label structure:
+`--data_dir` can be any processed dataset directory, but it must contain a
+`dataset.json` manifest and the requested split file (`test.json` by default;
+for example, the path above reads
+`data/datasets/text_pair/chaosnli/mnli_m/0/test.json`). It supplies the task,
+label order, and human annotations. To evaluate another split, pass
+`--ground_truth_split train` or `--ground_truth_split dev`; the split is not
+inferred from the prediction filename. Omit `--metrics` to report all
+applicable metrics; otherwise it retains only the requested metrics.
+
+`--output_file` receives the aggregate results. Add `--analysis` to also write
+disagreement-stratified metrics to `evaluation__analysis.json` and per-instance
+errors (including TVD, JSD, KL, cross-entropy, and L2) to
+`evaluation__analysis__instance_errors.csv` beside it. Use
+`--analysis-output-file` and `--instance-errors-file` to choose different
+paths.
+
+Choose which metrics to report from the output based on the label structure:
 
 - **One hard label per example:** use `accuracy` or `macro_f1`; use macro-F1 when each class should contribute equally despite imbalance.
 - **Categorical human-label distributions:** use `tvd` for distributional discrepancy. The paper's compact reporting set adds `kl` and `entropy_correlation`; the [metric relationships](docs/evaluation_metrics.md#spearman-correlation-in-the-paper) page explains that choice and its correlation evidence.
 - **Independent multilabel probabilities:** use `macro_f1` for the hard-label result. For the paper's soft-label reporting set, add `soft_macro_f1`, `multilabel_pojsd`, and `multilabel_entropy_correlation`.
 - **Several annotation dimensions:** choose the categorical metrics per dimension; `evaluate` also reports their unweighted overall mean.
 
-The [evaluation metrics guide](docs/evaluation_metrics.md) defines every metric, its required inputs, and its direction; use the [metrics notebook](notebooks/metrics_tutorial.ipynb) to compare them on small controlled inputs. The [evaluation options](docs/configuration_reference.md#evaluation) list the accepted `--metrics` names and evaluation artifacts.
+The [evaluation metrics guide](docs/evaluation_metrics.md) defines every metric, its required inputs, and its direction; use the [metrics notebook](notebooks/metrics_tutorial.ipynb) to compare them on small controlled inputs. The [evaluation options](docs/configuration_reference.md#evaluation) list the available inputs and evaluation artifacts.
 
 ### An external model
 
 The evaluation and analysis commands also work independently of SPInDa
-training. Convert an external model’s output to the [prediction JSON
-contract](docs/prediction_contract.md#prediction-json): either a top-level JSON
-array or an object containing a `predictions` array. Each record must have a
+training. Convert an external model's output to the [prediction JSON
+contract](docs/prediction_contract.md#prediction-json): a top-level JSON array.
+Each record must have a
 matching `id`, a probability vector in the dataset’s class order, and a
 zero-based predicted class:
 
@@ -173,19 +189,18 @@ Then run the same evaluator without loading any SPInDa checkpoint:
 ```bash
 uv run spinda evaluate \
   --predictions external_predictions.json \
-  --input_file external_input.json \
-  --human_labels external_human_labels.json \
+  --data_dir data/datasets/text_pair/chaosnli/mnli_m/0 \
   --output_file outputs/external_model/evaluation.json
 ```
 
-For [external human labels](docs/prediction_contract.md#evaluate-predictions)
-or [multidimensional outputs](docs/prediction_contract.md#multidimensional-prediction-json),
-use the corresponding prediction-contract variant.
+If the data is not in a processed dataset directory, pass a lightweight
+external ground-truth file with `--ground_truth` instead of `--data_dir`.
+Every row requires `id` and a zero-based integer `label`; include a numeric
+`human_dist` for every row to compute distributional metrics.
 
 For three-class soft-label data, `evaluate` can also write a static ternary PNG
-and an interactive HTML diagnostic with per-instance hover details. It is
-opt-in: pass `--ternary-plot` to write it, or use `--no-ternary-browser` to write only
-the PNG.
+and an interactive HTML diagnostic with per-instance hover details. Pass
+`--ternary-plot` to write it, or `--no-ternary-browser` to write only the PNG.
 
 ## Analyze across seed runs
 

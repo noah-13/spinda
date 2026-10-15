@@ -42,7 +42,7 @@ MultilevelGroundTruthSample = Union[MultilevelSample, SingleTextMultilevelSample
 
 
 EVALUATION_CONFIG_KEYS = {
-    "predictions", "predictions_format", "input_file", "human_labels",
+    "predictions", "predictions_format", "data_dir", "ground_truth", "ground_truth_split",
     "output_file", "metrics", "ternary_plot", "ternary_plot_dir", "ternary_plot_title",
     "ternary_source", "ternary_browser", "analysis", "disagreement_groups",
     "disagreement_boundaries", "analysis_output_file", "instance_errors_file",
@@ -192,6 +192,27 @@ def load_predictions(
     return predictions
 
 
+def load_ground_truth(file_path: Path) -> List[TextPairClassificationSample]:
+    """Load a lightweight categorical ground-truth JSON file."""
+    rows: List[tuple[str, int, Optional[List[float]]]] = []
+    for index, data in enumerate(load_records(file_path, kind="ground-truth records"), 1):
+        if not isinstance(data, dict):
+            raise ValueError(f"Ground truth record {index} in {file_path} must be a JSON object.")
+        sample_id, label = data.get("id"), data.get("label")
+        if not isinstance(sample_id, str) or not isinstance(label, int) or isinstance(label, bool):
+            raise ValueError(f"Ground truth record {index} in {file_path} requires string id and integer label.")
+        human_dist = data.get("human_dist")
+        if human_dist is not None and (not isinstance(human_dist, list) or not all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in human_dist)):
+            raise ValueError(f"Ground truth human_dist in record {index} must be a numeric list.")
+        rows.append((sample_id, label, human_dist))
+    has_distributions = any(dist is not None for _, _, dist in rows)
+    if has_distributions and any(dist is None for _, _, dist in rows):
+        raise ValueError("External ground truth must provide human_dist for every record or for none.")
+    if has_distributions:
+        return [TextPairDistributionSample(id=i, task="external_ground_truth", label=label, human_dist=dist or []) for i, label, dist in rows]
+    return [TextPairClassificationSample(id=i, task="external_ground_truth", label=label) for i, label, _ in rows]
+
+
 def load_human_labels(
     file_path: Path, prediction_kind: str, predictions: Optional[Sequence[PredictionRecord]] = None,
 ) -> list[Union[TextPairClassificationSample, TextPairDistributionSample, SingleTextClassificationSample, SingleTextDistributionSample, SingleTextMultilabelDistributionSample, MultilevelSample, SingleTextMultilevelSample]]:
@@ -318,8 +339,9 @@ def main() -> None:
     parser.add_argument("--metrics", nargs="+", default=None, help="Optional metric names to retain in results.")
     
     
-    parser.add_argument("--input_file", type=str, default=None, help="Input JSON aligned with predictions; may be the same file as --human_labels.")
-    parser.add_argument("--human_labels", type=str, default=None, help="Test JSON containing human annotation labels or distributions.")
+    parser.add_argument("--data_dir", type=str, default=None, help="Processed dataset directory containing dataset.json.")
+    parser.add_argument("--ground_truth", type=str, default=None, help="External categorical ground-truth JSON file.")
+    parser.add_argument("--ground_truth_split", choices=["train", "dev", "test"], default="test", help="Split to load from --data_dir (default: test).")
 
     parser.add_argument(
         "--output_file",
@@ -405,10 +427,8 @@ def main() -> None:
     args = parser.parse_args(namespace=argparse.Namespace(**config_values))
     if not args.predictions:
         parser.error("--predictions is required (in --config or on the command line).")
-    if not args.input_file:
-        parser.error("--input_file is required (in --config or on the command line).")
-    if not args.human_labels:
-        parser.error("--human_labels is required (in --config or on the command line).")
+    if bool(args.data_dir) == bool(args.ground_truth):
+        parser.error("Specify exactly one of --data_dir or --ground_truth.")
     
     # Load predictions
     print(f"Loading predictions from {args.predictions}...")
@@ -417,17 +437,28 @@ def main() -> None:
         predictions_format=args.predictions_format,
     )
     print(f"Loaded {len(predictions)} predictions")
-    prediction_kind = _infer_prediction_kind(predictions)
-    print(f"Inferred prediction contract: {prediction_kind}")
-    
-    from spinda.scripts.predict import _load_inputs
-    _, input_samples = _load_inputs(Path(args.input_file))
-    input_ids = {sample["id"] for sample in input_samples}
-    prediction_ids = {prediction.id for prediction in predictions}
-    if input_ids != prediction_ids:
-        raise ValueError("input_file IDs must exactly match prediction IDs.")
-    multilevel_eval = prediction_kind == "multilevel"
-    ground_truth = load_human_labels(Path(args.human_labels), prediction_kind, predictions)
+    multilevel_eval = False
+    if args.ground_truth:
+        ground_truth = load_ground_truth(Path(args.ground_truth))
+    else:
+        manifest_path = Path(args.data_dir) / "dataset.json"
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except FileNotFoundError as error:
+            raise FileNotFoundError(f"Dataset manifest not found: {manifest_path}") from error
+        data_format = manifest.get("format")
+        readers = {
+            "text_pair_label_distribution": TextPairClassificationJSONReader,
+            "single_text_label_distribution": SingleTextClassificationJSONReader,
+            "single_text_multilabel_annotation_distribution": SingleTextMultilabelJSONReader,
+            "text_pair_multidimensional_label_distribution": TextPairMultilevelJSONReader,
+            "single_text_multidimensional_label_distribution": SingleTextMultilevelJSONReader,
+        }
+        reader_class = readers.get(data_format)
+        if reader_class is None:
+            raise ValueError(f"Unsupported evaluation format: {data_format!r}")
+        ground_truth = reader_class(args.data_dir).load_split(args.ground_truth_split)
+        multilevel_eval = data_format in {"text_pair_multidimensional_label_distribution", "single_text_multidimensional_label_distribution"}
 
     print(f"Loaded {len(ground_truth)} ground truth samples")
 
@@ -435,7 +466,7 @@ def main() -> None:
     print(f"Matched prediction IDs: {len(predictions)}/{len(ground_truth)}")
     
     # Evaluate
-    evaluator = Evaluator(distribution_metrics=args.metrics if prediction_kind != "multilabel" else None)
+    evaluator = Evaluator(distribution_metrics=args.metrics if not (ground_truth and isinstance(ground_truth[0], SingleTextMultilabelDistributionSample)) else None)
     eval_output = None
     if multilevel_eval:
         print("Computing multilevel metrics...")

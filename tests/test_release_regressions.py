@@ -170,6 +170,9 @@ def test_cli_pipeline_uses_saved_length_and_exposes_requested_metrics(tiny_backb
     from spinda.scripts import train, predict, evaluate
     records=[{'id':str(i),'text':'hello world','annotation_labels':v} for i,v in enumerate([[0,0],[0,1],[1,1]])]
     data=tmp_path/'data.json';data.write_text(json.dumps(records))
+    eval_data=tmp_path/'eval_data';eval_data.mkdir()
+    (eval_data/'dataset.json').write_text(json.dumps({'format':'single_text_label_distribution','labels':['a','b'],'label_mode':'soft'}))
+    (eval_data/'test.json').write_text(json.dumps(records))
     config=tmp_path/'dataset.json';config.write_text(json.dumps({'format':'single_text_label_distribution','labels':['a','b'],'label_mode':'soft','train_path':str(data),'dev_path':str(data)}))
     output=tmp_path/'run'
     monkeypatch.setattr(sys,'argv',['train','--config',str(config),'--model',str(tiny_backbone),'--device','cpu','--num_epochs','1','--max_length','12','--dataloader_num_workers','0','--output_dir',str(output)])
@@ -185,7 +188,7 @@ def test_cli_pipeline_uses_saved_length_and_exposes_requested_metrics(tiny_backb
     predict.main()
     assert seen==[12]
     result=tmp_path/'evaluation.json'
-    monkeypatch.setattr(sys,'argv',['evaluate','--predictions',str(predictions),'--input_file',str(data),'--human_labels',str(data),'--metrics','macro_f1','soft_accuracy','--output_file',str(result)])
+    monkeypatch.setattr(sys,'argv',['evaluate','--predictions',str(predictions),'--data_dir',str(eval_data),'--metrics','macro_f1','soft_accuracy','--output_file',str(result)])
     evaluate.main()
     assert set(json.loads(result.read_text()))=={'macro_f1','soft_accuracy'}
 
