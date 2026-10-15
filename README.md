@@ -156,14 +156,13 @@ errors (including TVD, JSD, KL, cross-entropy, and L2) to
 `--analysis-output-file` and `--instance-errors-file` to choose different
 paths.
 
-Choose which metrics to report from the output based on the label structure:
-
-- **One hard label per example:** use `accuracy` or `macro_f1`; use macro-F1 when each class should contribute equally despite imbalance.
-- **Categorical human-label distributions:** use `tvd` for distributional discrepancy. The paper's compact reporting set adds `kl` and `entropy_correlation`; the [metric relationships](docs/evaluation_metrics.md#spearman-correlation-in-the-paper) page explains that choice and its correlation evidence.
-- **Independent multilabel probabilities:** use `macro_f1` for the hard-label result. For the paper's soft-label reporting set, add `soft_macro_f1`, `multilabel_pojsd`, and `multilabel_entropy_correlation`.
-- **Several annotation dimensions:** choose the categorical metrics per dimension; `evaluate` also reports their unweighted overall mean.
-
-The [evaluation metrics guide](docs/evaluation_metrics.md) defines every metric, its required inputs, and its direction; use the [metrics notebook](notebooks/metrics_tutorial.ipynb) to compare them on small controlled inputs. The [evaluation options](docs/configuration_reference.md#evaluation) list the available inputs and evaluation artifacts.
+See the [evaluation metrics guide](docs/evaluation_metrics.md) to choose
+metrics for hard labels, categorical human distributions, multi-label tasks,
+and multidimensional annotations. It also explains each metric's inputs,
+direction, and the paper's reporting choices. Use the
+[metrics notebook](notebooks/metrics_tutorial.ipynb) to compare metrics on
+controlled inputs; the [evaluation options](docs/configuration_reference.md#evaluation)
+list CLI inputs and artifacts.
 
 ### An external model
 
