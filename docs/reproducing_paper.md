@@ -78,8 +78,8 @@ follows [the prediction JSON contract](prediction_contract.md).
 ```bash
 uv run python -m spinda.scripts.evaluate \
   --predictions outputs/example/predictions.json \
-  --input_file data/datasets/text_pair/chaosnli/snli/0/test.json \
-  --human_labels data/datasets/text_pair/chaosnli/snli/0/test.json --analysis
+  --data_dir data/datasets/text_pair/chaosnli/snli/0 \
+  --analysis
 ```
 
 This writes distribution-aware metrics, entropy-stratified disagreement metrics,

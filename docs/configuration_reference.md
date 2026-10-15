@@ -93,18 +93,19 @@ paths on the command line.
 
 ## Evaluation
 
-`evaluate` compares predictions with annotated human-label rows. It requires
-matching `--predictions`, `--input_file`, and `--human_labels` files; the input
-and human-label file may be the same. The evaluator infers categorical,
-multilabel, or multidimensional output from `outputs`. See the
+`evaluate` compares predictions with either a processed dataset directory or a
+lightweight external ground-truth file. `--data_dir` and `--ground_truth` are
+mutually exclusive; the dataset directory must contain `dataset.json` and the
+requested split. See the
 [prediction contract](prediction_contract.md#evaluate-predictions) for file
 shapes and the [metric guide](evaluation_metrics.md) for metric selection.
 
 | Option | Accepted values | Default | Description |
 |---|---|---|---|
 | `--predictions` | JSON path | Required | Prediction file to evaluate. |
-| `--input_file` | JSON array path | Required | Prediction input; IDs must exactly match the prediction IDs. |
-| `--human_labels` | Annotated JSON array path | Required | Human annotation votes or distributions. |
+| `--data_dir` | Processed dataset directory | One of this or `--ground_truth` is required | Loads the manifest, label order, and human annotations. |
+| `--ground_truth` | External JSON path | One of this or `--data_dir` is required | Lightweight categorical ground truth: `id`, integer `label`, and optional `human_dist`. |
+| `--ground_truth_split` | `train`, `dev`, `test` | `test` | Split loaded from `--data_dir`; it is never inferred from the prediction filename. |
 | `--output_file` | JSON path | `outputs/evaluation/results/<stem>__eval.json` | Aggregate-metrics output path. |
 | `--metrics` | One or more metric names | All supported metrics | Retain only the named metrics. |
 | `--config` | One or more JSON paths | Optional | Merged evaluation settings; CLI values override them. |

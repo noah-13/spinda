@@ -36,29 +36,31 @@ checkpoint label names in a top-level `labels` field.
 
 ## Evaluate predictions
 
-`evaluate` requires all three of these files:
+`evaluate` requires a prediction file and exactly one ground-truth source:
 
 - `--predictions`: a prediction JSON file following one of the output contracts
   below.
-- `--input_file`: the input JSON used for inference. Its IDs must exactly match
-  the prediction IDs. It can be the same file as `--human_labels`.
-- `--human_labels`: an annotated JSON array with the matching IDs and text
-  fields. Its annotation field depends on the prediction kind.
+- `--data_dir`: a processed dataset directory containing `dataset.json` and
+  the requested split file (`test.json` by default). It supplies the task,
+  class order, and human annotations.
+- `--ground_truth`: an external categorical JSON array, used instead of
+  `--data_dir`. Each row requires `id` and a zero-based integer `label`; add
+  a numeric `human_dist` to every row for distributional metrics.
 
-For example, an annotated ChaosNLI test file can serve as both input and
-human-label source:
+For example, evaluate a ChaosNLI test split from its processed dataset
+directory:
 
 ```bash
 uv run spinda evaluate \
   --predictions predictions.json \
-  --input_file data/datasets/chaosnli/test.json \
-  --human_labels data/datasets/chaosnli/test.json \
+  --data_dir data/datasets/chaosnli \
+  --metrics tvd kl entropy_correlation \
   --output_file evaluation.json
 ```
 
-The evaluator infers whether the predictions are categorical, multilabel, or
-multidimensional from `outputs`; no task format or dataset directory is
-required.
+The evaluator loads categorical, multilabel, or multidimensional labels from
+the manifest's declared format. Pass `--ground_truth_split train` or
+`--ground_truth_split dev` to select another split.
 
 ## Prediction JSON
 
@@ -168,5 +170,6 @@ for three-class categorical soft-label predictions; it is disabled by default.
 ## External models
 
 Use the external model native inference code to produce one of the prediction
-JSON forms above, then pass it to `spinda evaluate` with the matching input and
-human-label files. External predictions are not loaded through `spinda predict`.
+JSON forms above, then pass it to `spinda evaluate` with the intended
+`--data_dir` or `--ground_truth`. External predictions are not loaded through
+`spinda predict`.
